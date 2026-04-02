@@ -37,6 +37,8 @@
   .draft-pill { animation: pulsePill 2s ease-in-out infinite; }
   @keyframes pulsePill { 0%,100%{opacity:.7} 50%{opacity:1} }
   .record-row:hover { background: #eff6ff !important; cursor: pointer; }
+  @keyframes syncPulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+  .sync-pulse { animation: syncPulse 1.2s ease-in-out infinite; }
 </style>
 </head>
 <body>
@@ -44,8 +46,46 @@
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
-/* ════════ MARGIN ════════ */
+/* ══════════════════════════════════════════════════════════════
+   🔧 EASY CONFIG — EDIT THESE VALUES
+   ══════════════════════════════════════════════════════════════ */
+
+/* Your Google Apps Script Web App URL — shared for ALL users */
+const HARDCODED_SHEETS_URL = "https://script.google.com/macros/s/AKfycbzdzKoB2yUr6csrMjBz1N0l1LEFV60pNbU8o-BZbm6-342Cki0ldbOzC8RI-nJiMC8q/exec";
+
+/* Margin multiplier: 1.30 = 30% markup shown to client */
 const MARGIN = 1.30;
+
+/* ══════════════════════════════════════════════════════════════
+   📊 DEFAULT RATES — EDIT HERE FOR FACTORY DEFAULTS
+   These only apply when no cloud rates have been saved yet.
+   Once you save rates in Settings, they sync to ALL users.
+   ══════════════════════════════════════════════════════════════ */
+const DEFAULTS = {
+  paperSettings: { baseConst: 3100, reamsBase: 500 },
+  plates:        { enabled: false, normalRate: 250, normalQty: "", heatingRate: 320, heatingQty: "" },
+  printing:      { enabled: false, type: "Normal", numColors: 4, paperQty: "", specialColors: 0, runCharge: 500, inkCharge: 0, rateMode: "Per 1000 Sheets", tier1000: 1200, tier5000: 1000, tier10000: 900, tierAbove: 800, ledRate: 3, pantoneRate: 300 },
+  varnish:       { enabled: false, length: "", width: "", sheetQty: "", divisor: 4, paisa: 0.01 },
+  uv:            { enabled: false, type: "Full UV", length: "", width: "", sheetQty: "", spotPerSheet: 100, spotInitial: 1000, fullUVDivisor: 4, hybridUVDivisor: 2.5, uvPaisa: 0.01, perSheetRate: 5 },
+  lamination:    { enabled: false, type: "Gloss", length: "", width: "", sheetQty: "", velvetRate: 8.28, glossDivisor: 3, glossPaisa: 0.01, mattDivisor: 1.5, mattPaisa: 0.01, perSheetRate: 6 },
+  foilingBlock:  { enabled: false, length: "", width: "", rate: 1 },
+  dieBlock:      { enabled: false, rateMode: "Rate per Block", numBlocks: 1, rate: 500, length: "", width: "", fixedPrice: "" },
+  dieCutting:    { enabled: false, rateMode: "Per 1000 Sheets", sheetQty: "", rate: 300, fixedCharge: "" },
+  pasting:       { enabled: false, lockQty: "", lockRate: 250, sideQty: "", sideRate: 100 },
+  packaging:     { enabled: false, mode: "Per Carton", numCartons: "", ratePerCarton: 60, fixedPrice: "" },
+  dispatch:      { enabled: false, fixedRate: 600 },
+  extraCharge:   { enabled: false, description: "", amount: "" },
+  companyInfo:   {
+    name:    "JSS THE PRINT ZONE",
+    tagline: "Offset Printing",
+    address: "dsidc shed, 39, Scheme 1, Okhla Phase II, New Delhi, Delhi 110020",
+    phone: "", email: "", gstin: "", terms: ""
+  },
+};
+
+/* ══════════════════════════════════════════════════════════════
+   END OF EASY CONFIG
+   ══════════════════════════════════════════════════════════════ */
 
 const T = {
   bgPage:"#f0f5ff", bgCard:"#ffffff", bgHeader:"#1a4fd6",
@@ -166,29 +206,6 @@ function ModeBtn({ label, active, onClick }) {
   );
 }
 
-/* ════════ DEFAULTS ════════ */
-const DEFAULTS = {
-  paperSettings: { baseConst:3100, reamsBase:500 },
-  plates:        { enabled:false, normalRate:250, normalQty:"", heatingRate:320, heatingQty:"" },
-  printing:      { enabled:false, type:"Normal", numColors:4, paperQty:"", specialColors:0, runCharge:500, inkCharge:0, rateMode:"Per 1000 Sheets", tier1000:1200, tier5000:1000, tier10000:900, tierAbove:800, ledRate:3, pantoneRate:300 },
-  varnish:       { enabled:false, length:"",width:"",sheetQty:"", divisor:4, paisa:0.01 },
-  uv:            { enabled:false, type:"Full UV", length:"",width:"",sheetQty:"", spotPerSheet:100, spotInitial:1000, fullUVDivisor:4, hybridUVDivisor:2.5, uvPaisa:0.01, perSheetRate:5 },
-  lamination:    { enabled:false, type:"Gloss", length:"",width:"",sheetQty:"", velvetRate:8.28, glossDivisor:3, glossPaisa:0.01, mattDivisor:1.5, mattPaisa:0.01, perSheetRate:6 },
-  foilingBlock:  { enabled:false, length:"",width:"", rate:1 },
-  dieBlock:      { enabled:false, rateMode:"Rate per Block", numBlocks:1, rate:500, length:"", width:"", fixedPrice:"" },
-  dieCutting:    { enabled:false, rateMode:"Per 1000 Sheets", sheetQty:"", rate:300, fixedCharge:"" },
-  pasting:       { enabled:false, lockQty:"", lockRate:250, sideQty:"", sideRate:100 },
-  packaging:     { enabled:false, mode:"Per Carton", numCartons:"", ratePerCarton:60, fixedPrice:"" },
-  dispatch:      { enabled:false, fixedRate:600 },
-  extraCharge:   { enabled:false, description:"", amount:"" },
-  companyInfo:   {
-    name:"JSS THE PRINT ZONE",
-    tagline:"Offset Printing",
-    address:"dsidc shed, 39, Scheme 1, Okhla Phase II, New Delhi, Delhi 110020",
-    phone:"", email:"", gstin:"", terms:""
-  },
-};
-
 function loadSaved(key) {
   try {
     const saved = localStorage.getItem("printcost_"+key);
@@ -215,15 +232,30 @@ function saveDraft(data) {
   try { localStorage.setItem(DRAFT_KEY, JSON.stringify({...data, savedAt: Date.now()})); } catch(e){}
 }
 
-/* ════════ APPS SCRIPT CODE FOR USER ════════ */
-const APPS_SCRIPT_CODE = `// ── PASTE THIS IN Google Apps Script ──
-const SHEET_NAME = "JSS_Estimates";
+/* ════════ UPDATED APPS SCRIPT CODE ════════ */
+const APPS_SCRIPT_CODE = `// ── PASTE THIS IN Google Apps Script (UPDATED VERSION) ──
+// ⚠️ Create a NEW deployment after replacing old code
+
+const SHEET_NAME  = "JSS_Estimates";
+const RATES_SHEET = "JSS_Rates";
 
 function doGet(e) {
+  // ── Fetch saved rates (used on app load to sync all users) ──
+  if (e.parameter.action === "getRates") {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName(RATES_SHEET);
+    if (!sheet || sheet.getLastRow() < 2) return makeResponse({ rates: null });
+    try {
+      const json = sheet.getRange(2, 1).getValue();
+      return makeResponse({ rates: JSON.parse(json) });
+    } catch(err) { return makeResponse({ rates: null }); }
+  }
+
+  // ── Fetch estimate records ──
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAME);
   const q = (e.parameter.q || "").toLowerCase().trim();
-  if (!sheet || sheet.getLastRow() <= 1) return makeResponse({records:[]});
+  if (!sheet || sheet.getLastRow() <= 1) return makeResponse({ records: [] });
   const data = sheet.getRange(2,1,sheet.getLastRow()-1,7).getValues();
   let records = data.map(r=>({id:r[0],date:r[1],jobName:r[2],clientName:r[3],grandTotal:r[4],jsonData:r[5],savedAt:r[6]})).filter(r=>r.id);
   if (q) records = records.filter(r=>
@@ -231,22 +263,42 @@ function doGet(e) {
     String(r.jobName).toLowerCase().includes(q)||
     String(r.clientName).toLowerCase().includes(q)||
     String(r.date).toLowerCase().includes(q));
-  return makeResponse({records});
+  return makeResponse({ records });
 }
 
 function doPost(e) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const p = JSON.parse(e.postData.contents);
+
+    // ── Save rates (synced to all users on next load) ──
+    if (p.type === "rates") {
+      let sheet = ss.getSheetByName(RATES_SHEET);
+      if (!sheet) {
+        sheet = ss.insertSheet(RATES_SHEET);
+        sheet.appendRow(["Rates JSON", "Saved At"]);
+        sheet.getRange(1,1,1,2).setFontWeight("bold").setBackground("#1a4fd6").setFontColor("#ffffff");
+      }
+      const rateJson = JSON.stringify(p.rates);
+      if (sheet.getLastRow() < 2) {
+        sheet.appendRow([rateJson, new Date().toLocaleString("en-IN")]);
+      } else {
+        sheet.getRange(2, 1).setValue(rateJson);
+        sheet.getRange(2, 2).setValue(new Date().toLocaleString("en-IN"));
+      }
+      return makeResponse({ success: true });
+    }
+
+    // ── Save estimate record ──
     let sheet = ss.getSheetByName(SHEET_NAME);
     if (!sheet) {
       sheet = ss.insertSheet(SHEET_NAME);
       sheet.appendRow(["ID","Date","Job Name","Client","Grand Total (₹)","Full Data","Saved At"]);
       sheet.getRange(1,1,1,7).setFontWeight("bold").setBackground("#1a4fd6").setFontColor("#ffffff");
     }
-    const p = JSON.parse(e.postData.contents);
     sheet.appendRow([p.id,p.date,p.jobName||"",p.clientName||"",p.grandTotal,JSON.stringify(p),new Date().toLocaleString("en-IN")]);
-    return makeResponse({success:true});
-  } catch(err) { return makeResponse({success:false,message:err.toString()}); }
+    return makeResponse({ success: true });
+  } catch(err) { return makeResponse({ success: false, message: err.toString() }); }
 }
 
 function makeResponse(data) {
@@ -263,14 +315,19 @@ function App() {
   const [settingsTab, setSettingsTab]   = useState("rates");
   const [draftSaved, setDraftSaved]     = useState(false);
 
-  /* Google Sheets URL */
-  const [sheetsUrl, setSheetsUrl] = useState(()=>localStorage.getItem("printcost_sheetsUrl")||"");
+  /* Cloud rate sync state */
+  const [ratesSyncing, setRatesSyncing] = useState(false);
+  const [ratesSynced,  setRatesSynced]  = useState(false);
+  const [ratesSyncErr, setRatesSyncErr] = useState(false);
+
+  /* Google Sheets URL — always starts with hardcoded value */
+  const [sheetsUrl, setSheetsUrl] = useState(()=>localStorage.getItem("printcost_sheetsUrl")||HARDCODED_SHEETS_URL);
   const [sheetsSaving, setSheetsSaving] = useState(false);
   const [sheetsSaved, setSheetsSaved]   = useState(false);
 
   /* Records */
-  const [recordsList, setRecordsList] = useState([]);
-  const [recordsQuery, setRecordsQuery] = useState("");
+  const [recordsList, setRecordsList]     = useState([]);
+  const [recordsQuery, setRecordsQuery]   = useState("");
   const [recordsLoading, setRecordsLoading] = useState(false);
 
   /* Load draft or defaults */
@@ -302,7 +359,7 @@ function App() {
   const [varnish,setVarnish]       = useState(()=>dr("varnish",loadSaved("varnish")));
   const [uv,setUV]                 = useState(()=>dr("uv",loadSaved("uv")));
   const [lamination,setLamination] = useState(()=>dr("lamination",loadSaved("lamination")));
-  const [foiling,setFoiling]       = useState(()=>dr("foiling",{ enabled:false, mode:"Area Based", length:"",width:"", numBlocks:1, numSheets:"", areaRate:2, perSheetRate:2 }));
+  const [foiling,setFoiling]       = useState(()=>dr("foiling",{ enabled:false, mode:"Area Based", length:"",width:"",numBlocks:1,numSheets:"",areaRate:2,perSheetRate:2 }));
   const [foilingBlock,setFoilingBlock] = useState(()=>dr("foilingBlock",loadSaved("foilingBlock")));
   const [dieBlock,setDieBlock]     = useState(()=>dr("dieBlock",loadSaved("dieBlock")||DEFAULTS.dieBlock));
   const [dieCutting,setDieCutting] = useState(()=>dr("dieCutting",loadSaved("dieCutting")));
@@ -313,6 +370,83 @@ function App() {
 
   const allUVTypes  = ["Full UV","Hybrid UV","Spot UV","Per Sheet", ...customUVTypes.map(t=>t.name)];
   const allLamTypes = ["Gloss","Matt","Velvet","Per Sheet", ...customLamTypes.map(t=>t.name)];
+
+  /* ══ APPLY CLOUD RATES TO STATE ══ */
+  const applyCloudRates = (r) => {
+    if (!r) return;
+    if (r.paperSettings)   setPaperSettings(p  => ({...p, ...r.paperSettings}));
+    if (r.platesRates)     setPlates(p          => ({...p, ...r.platesRates}));
+    if (r.printingRates)   setPrinting(p        => ({...p, ...r.printingRates}));
+    if (r.varnishRates)    setVarnish(p         => ({...p, ...r.varnishRates}));
+    if (r.uvRates)         setUV(p              => ({...p, ...r.uvRates}));
+    if (r.laminationRates) setLamination(p      => ({...p, ...r.laminationRates}));
+    if (r.foilingBlockRate !== undefined) setFoilingBlock(p => ({...p, rate: r.foilingBlockRate}));
+    if (r.dieBlockRate     !== undefined) setDieBlock(p     => ({...p, rate: r.dieBlockRate}));
+    if (r.dieCuttingRate   !== undefined) setDieCutting(p   => ({...p, rate: r.dieCuttingRate}));
+    if (r.pastingRates)    setPasting(p         => ({...p, ...r.pastingRates}));
+    if (r.packagingRates)  setPackaging(p       => ({...p, ...r.packagingRates}));
+    if (r.dispatchRate     !== undefined) setDispatch(p     => ({...p, fixedRate: r.dispatchRate}));
+    if (r.customUVTypes)   setCustomUVTypes(r.customUVTypes);
+    if (r.customLamTypes)  setCustomLamTypes(r.customLamTypes);
+    if (r.customFoilTypes) setCustomFoilTypes(r.customFoilTypes);
+    if (r.companyInfo)     setCompanyInfo(ci    => ({...ci, ...r.companyInfo}));
+  };
+
+  /* ══ FETCH RATES FROM CLOUD ON APP LOAD ══ */
+  useEffect(() => {
+    const url = HARDCODED_SHEETS_URL;
+    if (!url) return;
+    setRatesSyncing(true);
+    fetch(url + "?action=getRates")
+      .then(res => res.json())
+      .then(data => {
+        if (data.rates) {
+          applyCloudRates(data.rates);
+          setRatesSynced(true);
+          setTimeout(() => setRatesSynced(false), 3000);
+        }
+        setRatesSyncing(false);
+      })
+      .catch(() => {
+        setRatesSyncing(false);
+        setRatesSyncErr(true);
+        setTimeout(() => setRatesSyncErr(false), 4000);
+      });
+  }, []);
+
+  /* ══ BUILD RATES SNAPSHOT FOR CLOUD SAVE ══ */
+  const buildRatesSnapshot = () => ({
+    paperSettings,
+    platesRates:     { normalRate: plates.normalRate, heatingRate: plates.heatingRate },
+    printingRates:   { runCharge: printing.runCharge, tier1000: printing.tier1000, tier5000: printing.tier5000, tier10000: printing.tier10000, tierAbove: printing.tierAbove, pantoneRate: printing.pantoneRate, ledRate: printing.ledRate },
+    varnishRates:    { divisor: varnish.divisor, paisa: varnish.paisa },
+    uvRates:         { fullUVDivisor: uv.fullUVDivisor, hybridUVDivisor: uv.hybridUVDivisor, uvPaisa: uv.uvPaisa, spotPerSheet: uv.spotPerSheet, spotInitial: uv.spotInitial, perSheetRate: uv.perSheetRate },
+    laminationRates: { glossDivisor: lamination.glossDivisor, glossPaisa: lamination.glossPaisa, mattDivisor: lamination.mattDivisor, mattPaisa: lamination.mattPaisa, velvetRate: lamination.velvetRate, perSheetRate: lamination.perSheetRate },
+    foilingBlockRate: foilingBlock.rate,
+    dieBlockRate:     dieBlock.rate,
+    dieCuttingRate:   dieCutting.rate,
+    pastingRates:    { lockRate: pasting.lockRate, sideRate: pasting.sideRate },
+    packagingRates:  { ratePerCarton: packaging.ratePerCarton },
+    dispatchRate:    dispatch.fixedRate,
+    customUVTypes,
+    customLamTypes,
+    customFoilTypes,
+    companyInfo,
+  });
+
+  /* ══ SAVE RATES TO CLOUD ══ */
+  const saveRatesToCloud = async (snapshot) => {
+    const url = sheetsUrl || HARDCODED_SHEETS_URL;
+    if (!url) return false;
+    try {
+      await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify({ type: "rates", rates: snapshot })
+      });
+      return true;
+    } catch(e) { return false; }
+  };
 
   /* ── AUTO DRAFT SAVE ── */
   const draftTimer = useRef(null);
@@ -335,25 +469,40 @@ function App() {
     setJobName(""); setClientName(""); setJobDate(new Date().toISOString().split("T")[0]);
     setQuoteNo(genQuoteNo()); setQuoteNotes("");
     setPaperRows([{id:Date.now(),length:"",width:"",gsm:"",unit:"Packet",sheetQty:"",ratePerKg:""}]);
-    setPlates(DEFAULTS.plates); setPrinting(DEFAULTS.printing); setVarnish(DEFAULTS.varnish);
-    setUV(DEFAULTS.uv); setLamination(DEFAULTS.lamination);
+    setPlates(p=>({...DEFAULTS.plates, normalRate:p.normalRate, heatingRate:p.heatingRate}));
+    setPrinting(p=>({...DEFAULTS.printing, tier1000:p.tier1000, tier5000:p.tier5000, tier10000:p.tier10000, tierAbove:p.tierAbove, runCharge:p.runCharge, pantoneRate:p.pantoneRate, ledRate:p.ledRate}));
+    setVarnish(p=>({...DEFAULTS.varnish, divisor:p.divisor, paisa:p.paisa}));
+    setUV(p=>({...DEFAULTS.uv, fullUVDivisor:p.fullUVDivisor, hybridUVDivisor:p.hybridUVDivisor, uvPaisa:p.uvPaisa, spotPerSheet:p.spotPerSheet, spotInitial:p.spotInitial, perSheetRate:p.perSheetRate}));
+    setLamination(p=>({...DEFAULTS.lamination, glossDivisor:p.glossDivisor, glossPaisa:p.glossPaisa, mattDivisor:p.mattDivisor, mattPaisa:p.mattPaisa, velvetRate:p.velvetRate, perSheetRate:p.perSheetRate}));
     setFoiling({enabled:false,mode:"Area Based",length:"",width:"",numBlocks:1,numSheets:"",areaRate:2,perSheetRate:2});
-    setFoilingBlock(DEFAULTS.foilingBlock); setDieBlock(DEFAULTS.dieBlock);
-    setDieCutting(DEFAULTS.dieCutting); setPasting(DEFAULTS.pasting);
-    setPackaging(DEFAULTS.packaging); setDispatch(DEFAULTS.dispatch);
+    setFoilingBlock(p=>({...DEFAULTS.foilingBlock, rate:p.rate}));
+    setDieBlock(p=>({...DEFAULTS.dieBlock, rate:p.rate}));
+    setDieCutting(p=>({...DEFAULTS.dieCutting, rate:p.rate}));
+    setPasting(p=>({...DEFAULTS.pasting, lockRate:p.lockRate, sideRate:p.sideRate}));
+    setPackaging(p=>({...DEFAULTS.packaging, ratePerCarton:p.ratePerCarton}));
+    setDispatch(p=>({...DEFAULTS.dispatch, fixedRate:p.fixedRate}));
     setExtraCharge(DEFAULTS.extraCharge);
   };
 
-  /* ── SAVE SETTINGS ── */
-  const handleSaveSettings = () => {
+  /* ── SAVE SETTINGS (local + cloud) ── */
+  const handleSaveSettings = async () => {
     localStorage.setItem("printcost_sheetsUrl", sheetsUrl);
-    const ok = saveAllRates({
+    const snapshot = buildRatesSnapshot();
+    const localOk = saveAllRates({
       paperSettings, companyInfo, plates, printing, varnish, uv, lamination,
       foilingBlock, dieBlock, dieCutting, pasting, packaging, dispatch, extraCharge,
       customUVTypes, customLamTypes, customFoilTypes
     });
-    setSaveMsg(ok ? "✅ Rates & settings saved!" : "⚠️ Could not save.");
-    setTimeout(()=>setSaveMsg(""), 3000);
+    setSaveMsg("⏳ Saving & syncing to cloud...");
+    const cloudOk = await saveRatesToCloud(snapshot);
+    if (localOk && cloudOk) {
+      setSaveMsg("✅ Rates saved & synced to all users!");
+    } else if (localOk) {
+      setSaveMsg("✅ Saved locally. ⚠️ Cloud sync failed — check Apps Script URL.");
+    } else {
+      setSaveMsg("⚠️ Could not save.");
+    }
+    setTimeout(()=>setSaveMsg(""), 4000);
     setShowSettings(false);
   };
 
@@ -411,7 +560,7 @@ function App() {
     const area=n(uv.length)*n(uv.width),sheets=n(uv.sheetQty);
     const customType=customUVTypes.find(t=>t.name===uv.type);
     let base=0,extra=0;
-    if(uv.type==="Full UV")      base=area/(n(uv.fullUVDivisor)||4)*(n(uv.uvPaisa)||0.01)*sheets;
+    if(uv.type==="Full UV")        base=area/(n(uv.fullUVDivisor)||4)*(n(uv.uvPaisa)||0.01)*sheets;
     else if(uv.type==="Hybrid UV") base=area/(n(uv.hybridUVDivisor)||2.5)*(n(uv.uvPaisa)||0.01)*sheets;
     else if(uv.type==="Spot UV")   {base=n(uv.spotPerSheet)*sheets; extra=n(uv.spotInitial);}
     else if(uv.type==="Per Sheet") base=n(uv.perSheetRate)*sheets;
@@ -477,22 +626,19 @@ function App() {
 
   /* ── SAVE TO GOOGLE SHEETS ── */
   const saveToSheets = async () => {
-    if(!sheetsUrl) { alert("Please add your Google Apps Script URL in Settings → Google Sheets."); return; }
+    const url = sheetsUrl || HARDCODED_SHEETS_URL;
+    if(!url) { alert("Google Sheets URL not configured."); return; }
     setSheetsSaving(true);
     try {
       const payload = {
-        id: quoteNo,
-        date: jobDate,
-        jobName,
-        clientName,
+        id: quoteNo, date: jobDate, jobName, clientName,
         grandTotal: grandTotalWithMargin.toFixed(2),
         summaryItems: summaryItems.map(([name,val])=>({name: name.replace(/[^\w ]/g,"").trim(), value: (val*MARGIN).toFixed(2)})),
         paperRows: paperCalc.rows.map(r=>({L:r.length,W:r.width,GSM:r.gsm,sheets:r.sheetQty,kg:r.weight?.toFixed(4),price:r.price?.toFixed(2)})),
-        /* ── Save full section states so records can be fully restored ── */
         _sections: { paperRows, plates, printing, varnish, uv, lamination, foiling, foilingBlock, dieBlock, dieCutting, pasting, packaging, dispatch, extraCharge },
         savedAt: new Date().toISOString()
       };
-      await fetch(sheetsUrl, {
+      await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "text/plain" },
         body: JSON.stringify(payload)
@@ -501,7 +647,7 @@ function App() {
       setSaveMsg("✅ Record saved to Google Sheets!");
       setTimeout(()=>{setSheetsSaved(false); setSaveMsg("");}, 3500);
     } catch(err) {
-      setSaveMsg("⚠️ Could not save to Sheets. Check the URL in Settings.");
+      setSaveMsg("⚠️ Could not save to Sheets.");
       setTimeout(()=>setSaveMsg(""), 4000);
     }
     setSheetsSaving(false);
@@ -509,11 +655,12 @@ function App() {
 
   /* ── FETCH RECORDS FROM SHEETS ── */
   const fetchRecords = async (q="") => {
-    if(!sheetsUrl) { alert("Add your Google Apps Script URL in Settings → Google Sheets."); return; }
+    const url = sheetsUrl || HARDCODED_SHEETS_URL;
+    if(!url) { alert("Sheets URL not configured."); return; }
     setRecordsLoading(true);
     try {
-      const url = sheetsUrl + (sheetsUrl.includes("?")?"&":"?") + "action=list" + (q?`&q=${encodeURIComponent(q)}`:"");
-      const res = await fetch(url);
+      const fetchUrl = url + (url.includes("?")?"&":"?") + "action=list" + (q?`&q=${encodeURIComponent(q)}`:"");
+      const res = await fetch(fetchUrl);
       const data = await res.json();
       setRecordsList(data.records||[]);
     } catch(err) {
@@ -523,24 +670,16 @@ function App() {
     setRecordsLoading(false);
   };
 
-  /* ── LOAD OLD RECORD — fully restores all sections ── */
+  /* ── LOAD OLD RECORD ── */
   const loadRecord = (rec) => {
     try {
       const p = typeof rec.jsonData === "string" ? JSON.parse(rec.jsonData) : rec.jsonData;
       if(!p) return;
-
-      /* ── Basic job info ── */
-      setJobName(p.jobName || "");
-      setClientName(p.clientName || "");
+      setJobName(p.jobName || ""); setClientName(p.clientName || "");
       setJobDate(p.date || new Date().toISOString().split("T")[0]);
       setQuoteNo(p.id || genQuoteNo());
-
-      /* ── Full section states (saved under _sections key) ── */
       const s = p._sections || {};
-
-      if(s.paperRows && Array.isArray(s.paperRows) && s.paperRows.length > 0) {
-        setPaperRows(s.paperRows);
-      }
+      if(s.paperRows && Array.isArray(s.paperRows) && s.paperRows.length > 0) setPaperRows(s.paperRows);
       if(s.plates)       setPlates({      ...DEFAULTS.plates,      ...s.plates      });
       if(s.printing)     setPrinting({    ...DEFAULTS.printing,    ...s.printing    });
       if(s.varnish)      setVarnish({     ...DEFAULTS.varnish,     ...s.varnish     });
@@ -554,13 +693,10 @@ function App() {
       if(s.packaging)    setPackaging({   ...DEFAULTS.packaging,   ...s.packaging   });
       if(s.dispatch)     setDispatch({    ...DEFAULTS.dispatch,    ...s.dispatch    });
       if(s.extraCharge)  setExtraCharge({ ...DEFAULTS.extraCharge, ...s.extraCharge });
-
       setShowRecords(false);
       setSaveMsg("📂 Record loaded: " + (p.jobName || p.id));
       setTimeout(()=>setSaveMsg(""), 3000);
-    } catch(e) {
-      alert("Could not load this record.");
-    }
+    } catch(e) { alert("Could not load this record."); }
   };
 
   /* ── COPY UTILS ── */
@@ -690,8 +826,6 @@ _This is an estimated amount. Final may vary._`;
     return (
       <div style={{position:"fixed",inset:0,background:"rgba(10,20,60,.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2000,padding:16}}>
         <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:640,maxHeight:"94vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 32px 80px rgba(10,20,60,.4)"}}>
-
-          {/* Toolbar */}
           <div className="no-print" style={{background:"#1a4fd6",padding:"12px 18px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,gap:8,flexWrap:"wrap"}}>
             <span style={{color:"#fff",fontWeight:800,fontSize:14}}>📄 Client Slip Preview</span>
             <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
@@ -699,41 +833,23 @@ _This is an estimated amount. Final may vary._`;
                 <span style={{color:"rgba(255,255,255,.75)",fontSize:11,fontWeight:600}}>Show breakdown</span>
                 <Toggle on={slipShowBreakdown} onClick={()=>setSlipShowBreakdown(v=>!v)} />
               </div>
-              <button onClick={()=>saveToSheets()}
-                style={{background:sheetsSaved?"#16a34a":"#059669",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              <button onClick={()=>saveToSheets()} style={{background:sheetsSaved?"#16a34a":"#059669",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
                 {sheetsSaving?"⏳ Saving...":sheetsSaved?"✅ Saved!":"📊 Save to Sheets"}
               </button>
-              <button onClick={copyWhatsApp}
-                style={{background:"#25D366",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                📲 WhatsApp
-              </button>
-              <button onClick={()=>window.print()}
-                style={{background:"rgba(255,255,255,.18)",border:"1.5px solid rgba(255,255,255,.3)",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                🖨 Print / PDF
-              </button>
-              <button onClick={()=>setShowQuote(false)}
-                style={{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",width:30,height:30,borderRadius:6,fontSize:18,cursor:"pointer",fontFamily:"inherit"}}>×</button>
+              <button onClick={copyWhatsApp} style={{background:"#25D366",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📲 WhatsApp</button>
+              <button onClick={()=>window.print()} style={{background:"rgba(255,255,255,.18)",border:"1.5px solid rgba(255,255,255,.3)",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🖨 Print / PDF</button>
+              <button onClick={()=>setShowQuote(false)} style={{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",width:30,height:30,borderRadius:6,fontSize:18,cursor:"pointer",fontFamily:"inherit"}}>×</button>
             </div>
           </div>
-
-          {/* Remark */}
           <div className="no-print" style={{padding:"10px 18px",background:"#f5f8ff",borderBottom:"1px solid #e8f0fe",flexShrink:0,display:"flex",gap:10,alignItems:"center"}}>
             <span style={{fontSize:11,fontWeight:700,color:"#4a6494",whiteSpace:"nowrap"}}>Remark (optional):</span>
-            <input value={slipRemark} onChange={e=>setSlipRemark(e.target.value)}
-              placeholder="e.g. 50% advance paid, urgent delivery, GST extra..."
-              style={{...BASE_INP,fontSize:12}} />
+            <input value={slipRemark} onChange={e=>setSlipRemark(e.target.value)} placeholder="e.g. 50% advance paid, urgent delivery, GST extra..." style={{...BASE_INP,fontSize:12}} />
           </div>
-
-          {/* Printable area */}
           <div style={{overflowY:"auto",flex:1,padding:"32px 40px 36px",background:"#fff"}}>
-
-            {/* Header */}
             <div style={{borderBottom:"3px solid #1a4fd6",paddingBottom:16,marginBottom:20}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
                 <div>
-                  <div style={{fontSize:22,fontWeight:800,color:"#1a4fd6",letterSpacing:-0.3,lineHeight:1.1}}>
-                    {ci.name||"JSS THE PRINT ZONE"}
-                  </div>
+                  <div style={{fontSize:22,fontWeight:800,color:"#1a4fd6",letterSpacing:-0.3,lineHeight:1.1}}>{ci.name||"JSS THE PRINT ZONE"}</div>
                   {ci.tagline && <div style={{fontSize:11,color:"#8ca5cc",marginTop:3,fontWeight:500,letterSpacing:.4}}>{ci.tagline}</div>}
                   <div style={{marginTop:8,fontSize:12,color:"#4a6494",lineHeight:1.7}}>
                     {ci.phone   && <span style={{marginRight:16}}>📞 {ci.phone}</span>}
@@ -748,8 +864,6 @@ _This is an estimated amount. Final may vary._`;
                 </div>
               </div>
             </div>
-
-            {/* Client + Job */}
             <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:14,marginBottom:22}}>
               <div style={{background:"#f5f8ff",borderRadius:7,padding:"12px 14px",border:"1px solid #e8f0fe"}}>
                 <div style={{fontSize:9,fontWeight:700,color:"#8ca5cc",textTransform:"uppercase",letterSpacing:1.1,marginBottom:5}}>Client</div>
@@ -760,50 +874,35 @@ _This is an estimated amount. Final may vary._`;
                 <div style={{fontWeight:700,fontSize:14,color:"#1e2d50"}}>{jobName||"—"}</div>
               </div>
             </div>
-
-            {/* Breakdown table */}
             {slipShowBreakdown && summaryItems.length>0 && (
               <table style={{width:"100%",borderCollapse:"collapse",marginBottom:16,fontSize:13}}>
                 <thead>
                   <tr>
-                    <th style={{textAlign:"left",padding:"7px 10px",background:"#e8f0fe",color:"#1a4fd6",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:.8,borderRadius:"4px 0 0 4px"}}>Item</th>
-                    <th style={{textAlign:"right",padding:"7px 10px",background:"#e8f0fe",color:"#1a4fd6",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:.8,borderRadius:"0 4px 4px 0",width:140}}>Amount (₹)</th>
+                    <th style={{textAlign:"left",padding:"7px 10px",background:"#e8f0fe",color:"#1a4fd6",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:.8}}>Item</th>
+                    <th style={{textAlign:"right",padding:"7px 10px",background:"#e8f0fe",color:"#1a4fd6",fontWeight:700,fontSize:10,textTransform:"uppercase",letterSpacing:.8,width:140}}>Amount (₹)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {summaryItems.map(([name,val],i)=>(
                     <tr key={name} style={{background:i%2===0?"#fff":"#f8faff"}}>
-                      <td style={{padding:"8px 10px",color:"#1e2d50",fontWeight:600,borderBottom:"1px solid #eef2fb"}}>
-                        {name.replace(/[^\w ]/g,"").trim()}
-                      </td>
-                      <td style={{padding:"8px 10px",textAlign:"right",fontFamily:"monospace",fontWeight:700,color:"#1e2d50",borderBottom:"1px solid #eef2fb"}}>
-                        ₹ {fmt(val * MARGIN)}
-                      </td>
+                      <td style={{padding:"8px 10px",color:"#1e2d50",fontWeight:600,borderBottom:"1px solid #eef2fb"}}>{name.replace(/[^\w ]/g,"").trim()}</td>
+                      <td style={{padding:"8px 10px",textAlign:"right",fontFamily:"monospace",fontWeight:700,color:"#1e2d50",borderBottom:"1px solid #eef2fb"}}>₹ {fmt(val * MARGIN)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             )}
-
-            {/* Total block */}
             <div style={{display:"flex",justifyContent:"flex-end",marginBottom:22}}>
               <div style={{background:"#1a4fd6",borderRadius:9,padding:"15px 28px",textAlign:"right",minWidth:240}}>
-                <div style={{color:"rgba(255,255,255,.6)",fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:1.5,marginBottom:4}}>
-                  {slipShowBreakdown?"Grand Total":"Estimated Amount"}
-                </div>
-                <div style={{color:"#fff",fontFamily:"monospace",fontSize:30,fontWeight:800,lineHeight:1}}>
-                  ₹ {fmt(grandTotalWithMargin)}
-                </div>
+                <div style={{color:"rgba(255,255,255,.6)",fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:1.5,marginBottom:4}}>{slipShowBreakdown?"Grand Total":"Estimated Amount"}</div>
+                <div style={{color:"#fff",fontFamily:"monospace",fontSize:30,fontWeight:800,lineHeight:1}}>₹ {fmt(grandTotalWithMargin)}</div>
               </div>
             </div>
-
             {slipRemark && (
               <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:7,padding:"10px 14px",marginBottom:18,fontSize:12,color:"#92400e"}}>
                 📝 <b>Note:</b> {slipRemark}
               </div>
             )}
-
-            {/* Footer */}
             <div style={{borderTop:"1px solid #e8f0fe",paddingTop:14,display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
               <div style={{fontSize:10,color:"#8ca5cc",lineHeight:1.8}}>
                 <div>This is an estimated amount. Final may vary.</div>
@@ -811,9 +910,7 @@ _This is an estimated amount. Final may vary._`;
               </div>
               <div style={{textAlign:"right"}}>
                 <div style={{fontSize:10,color:"#8ca5cc",marginBottom:28}}>Authorised Signatory</div>
-                <div style={{borderTop:"1.5px solid #1e2d50",paddingTop:6,fontSize:11,fontWeight:700,color:"#1e2d50"}}>
-                  {ci.name||"JSS THE PRINT ZONE"}
-                </div>
+                <div style={{borderTop:"1.5px solid #1e2d50",paddingTop:6,fontSize:11,fontWeight:700,color:"#1e2d50"}}>{ci.name||"JSS THE PRINT ZONE"}</div>
               </div>
             </div>
           </div>
@@ -833,46 +930,16 @@ _This is an estimated amount. Final may vary._`;
           </div>
           <button onClick={()=>setShowRecords(false)} style={{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",width:30,height:30,borderRadius:6,fontSize:18,cursor:"pointer",fontFamily:"inherit"}}>×</button>
         </div>
-
         <div style={{padding:"14px 18px",background:"#f5f8ff",borderBottom:"1px solid #e8f0fe",flexShrink:0,display:"flex",gap:10}}>
-          <input value={recordsQuery} onChange={e=>setRecordsQuery(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&fetchRecords(recordsQuery)}
-            placeholder="Search by job, client, date or ID..."
-            style={{...BASE_INP,flex:1}} />
-          <button onClick={()=>fetchRecords(recordsQuery)}
-            style={{background:"#1a4fd6",color:"#fff",border:"none",padding:"8px 18px",borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
-            🔍 Search
-          </button>
-          <button onClick={()=>fetchRecords("")}
-            style={{background:"#f5f8ff",color:"#4a6494",border:"1.5px solid #c5d8f8",padding:"8px 14px",borderRadius:7,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>
-            Show All
-          </button>
+          <input value={recordsQuery} onChange={e=>setRecordsQuery(e.target.value)} onKeyDown={e=>e.key==="Enter"&&fetchRecords(recordsQuery)} placeholder="Search by job, client, date or ID..." style={{...BASE_INP,flex:1}} />
+          <button onClick={()=>fetchRecords(recordsQuery)} style={{background:"#1a4fd6",color:"#fff",border:"none",padding:"8px 18px",borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>🔍 Search</button>
+          <button onClick={()=>fetchRecords("")} style={{background:"#f5f8ff",color:"#4a6494",border:"1.5px solid #c5d8f8",padding:"8px 14px",borderRadius:7,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flexShrink:0}}>Show All</button>
         </div>
-
         <div style={{overflowY:"auto",flex:1,padding:18}}>
-          {!sheetsUrl && (
-            <div style={{textAlign:"center",padding:"32px 20px",color:"#4a6494"}}>
-              <div style={{fontSize:32,marginBottom:12}}>📊</div>
-              <div style={{fontWeight:700,marginBottom:6}}>Google Sheets not connected</div>
-              <div style={{fontSize:12}}>Go to ⚙️ Settings → Google Sheets and add your Apps Script URL.</div>
-            </div>
-          )}
-          {sheetsUrl && recordsLoading && (
-            <div style={{textAlign:"center",padding:"32px 20px",color:"#4a6494"}}>
-              <div style={{fontSize:28,marginBottom:8}}>⏳</div>
-              <div style={{fontSize:13}}>Loading records...</div>
-            </div>
-          )}
-          {sheetsUrl && !recordsLoading && recordsList.length===0 && (
-            <div style={{textAlign:"center",padding:"32px 20px",color:"#8ca5cc"}}>
-              <div style={{fontSize:32,marginBottom:10}}>🗂</div>
-              <div style={{fontWeight:600,fontSize:13}}>No records found. Click "Show All" or save your first estimate.</div>
-            </div>
-          )}
+          {recordsLoading && <div style={{textAlign:"center",padding:"32px 20px",color:"#4a6494"}}><div style={{fontSize:28,marginBottom:8}}>⏳</div><div style={{fontSize:13}}>Loading records...</div></div>}
+          {!recordsLoading && recordsList.length===0 && <div style={{textAlign:"center",padding:"32px 20px",color:"#8ca5cc"}}><div style={{fontSize:32,marginBottom:10}}>🗂</div><div style={{fontWeight:600,fontSize:13}}>No records found. Click "Show All" or save your first estimate.</div></div>}
           {recordsList.map((rec,i)=>(
-            <div key={rec.id||i} className="record-row"
-              onClick={()=>loadRecord(rec)}
-              style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",background:i%2===0?"#fff":"#f8faff",borderRadius:7,marginBottom:6,border:"1.5px solid #e8f0fe",transition:"background .15s"}}>
+            <div key={rec.id||i} className="record-row" onClick={()=>loadRecord(rec)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 14px",background:i%2===0?"#fff":"#f8faff",borderRadius:7,marginBottom:6,border:"1.5px solid #e8f0fe",transition:"background .15s"}}>
               <div>
                 <div style={{fontWeight:700,fontSize:13,color:"#1e2d50"}}>{rec.jobName||"—"}</div>
                 <div style={{fontSize:11,color:"#8ca5cc",marginTop:2}}>{rec.clientName||"—"} &nbsp;·&nbsp; {rec.date||""} &nbsp;·&nbsp; <span style={{fontFamily:"monospace",color:"#3b70e8"}}>{rec.id}</span></div>
@@ -884,11 +951,8 @@ _This is an estimated amount. Final may vary._`;
             </div>
           ))}
         </div>
-
         <div style={{padding:"12px 18px",background:"#f5f8ff",borderTop:"1px solid #e8f0fe",flexShrink:0}}>
-          <div style={{fontSize:11,color:"#8ca5cc",textAlign:"center"}}>
-            {recordsList.length>0?`${recordsList.length} record(s) found — click any to load into estimator`:"Search or load all records from your Google Sheet"}
-          </div>
+          <div style={{fontSize:11,color:"#8ca5cc",textAlign:"center"}}>{recordsList.length>0?`${recordsList.length} record(s) found — click any to load into estimator`:"Search or load all records from your Google Sheet"}</div>
         </div>
       </div>
     </div>
@@ -901,50 +965,44 @@ _This is an estimated amount. Final may vary._`;
         <div style={{background:T.bgHeader,padding:"16px 22px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
           <div>
             <div style={{color:"#fff",fontWeight:800,fontSize:15}}>⚙️ Settings</div>
-            <div style={{color:"rgba(255,255,255,.6)",fontSize:11,marginTop:1}}>Rates, Company Info, Custom Types & Google Sheets</div>
+            <div style={{color:"rgba(255,255,255,.6)",fontSize:11,marginTop:1}}>Rates sync to ALL users on save — Custom Types — Company Info</div>
           </div>
           <button onClick={()=>setShowSettings(false)} style={{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",width:30,height:30,borderRadius:6,fontSize:18,cursor:"pointer",fontFamily:"inherit"}}>×</button>
         </div>
-
-        {/* Tabs */}
         <div style={{display:"flex",gap:0,borderBottom:`1.5px solid ${T.border}`,background:"#f5f8ff",flexShrink:0,overflowX:"auto"}}>
           {[["rates","📊 Rates"],["company","🏢 Company"],["custom","🎨 Custom Types"],["sheets","📊 Google Sheets"]].map(([tab,label])=>(
-            <button key={tab} onClick={()=>setSettingsTab(tab)} style={{
-              padding:"11px 18px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",
-              background:settingsTab===tab?"#fff":"transparent",color:settingsTab===tab?T.primary:T.textMid,
-              border:"none",borderBottom:settingsTab===tab?`2.5px solid ${T.primary}`:"2.5px solid transparent"
-            }}>{label}</button>
+            <button key={tab} onClick={()=>setSettingsTab(tab)} style={{padding:"11px 18px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",background:settingsTab===tab?"#fff":"transparent",color:settingsTab===tab?T.primary:T.textMid,border:"none",borderBottom:settingsTab===tab?`2.5px solid ${T.primary}`:"2.5px solid transparent"}}>{label}</button>
           ))}
         </div>
-
         <div style={{overflowY:"auto",padding:"16px 22px 8px",flex:1}}>
-
-          {/* ── RATES ── */}
-          {settingsTab==="rates" && rateGroups.map(group=>(
-            <div key={group.title} style={{marginBottom:10,borderRadius:8,border:`1.5px solid ${T.border}`,overflow:"hidden"}}>
-              <div style={{background:T.bgSection,padding:"9px 14px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:8}}>
-                <span>{group.icon}</span>
-                <span style={{fontSize:12,fontWeight:700,color:group.color,textTransform:"uppercase",letterSpacing:.8}}>{group.title}</span>
+          {settingsTab==="rates" && (
+            <div>
+              <div style={{background:"#ecfdf5",border:"1px solid #6ee7b7",borderRadius:7,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#065f46",lineHeight:1.6}}>
+                ☁️ <b>Cloud Sync Active:</b> When you click "Save &amp; Apply", rates are saved to Google Sheets and automatically loaded for <b>everyone</b> who opens this app next time.
               </div>
-              <div style={{padding:"12px 14px",display:"flex",gap:10,flexWrap:"wrap"}}>
-                {group.fields.map(f=>(
-                  <div key={f.label} style={{flex:1,minWidth:170}}>
-                    <label style={{display:"block",fontSize:10,fontWeight:700,color:"#4a6494",textTransform:"uppercase",letterSpacing:1,marginBottom:4}}>{f.label}</label>
-                    <input type="number" value={f.get()} readOnly={!!f.ro}
-                      onChange={e=>!f.ro&&f.set&&f.set(e.target.value)}
-                      style={f.ro?{...BASE_INP,background:"#eef4ff",color:"#1a4fd6",fontWeight:700,cursor:"default"}:BASE_INP} />
-                    {f.hint && <div style={{color:T.textDim,fontSize:10,marginTop:3}}>{f.hint}</div>}
+              {rateGroups.map(group=>(
+                <div key={group.title} style={{marginBottom:10,borderRadius:8,border:`1.5px solid ${T.border}`,overflow:"hidden"}}>
+                  <div style={{background:T.bgSection,padding:"9px 14px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:8}}>
+                    <span>{group.icon}</span>
+                    <span style={{fontSize:12,fontWeight:700,color:group.color,textTransform:"uppercase",letterSpacing:.8}}>{group.title}</span>
                   </div>
-                ))}
-              </div>
+                  <div style={{padding:"12px 14px",display:"flex",gap:10,flexWrap:"wrap"}}>
+                    {group.fields.map(f=>(
+                      <div key={f.label} style={{flex:1,minWidth:170}}>
+                        <label style={{display:"block",fontSize:10,fontWeight:700,color:"#4a6494",textTransform:"uppercase",letterSpacing:1,marginBottom:4}}>{f.label}</label>
+                        <input type="number" value={f.get()} readOnly={!!f.ro} onChange={e=>!f.ro&&f.set&&f.set(e.target.value)} style={f.ro?{...BASE_INP,background:"#eef4ff",color:"#1a4fd6",fontWeight:700,cursor:"default"}:BASE_INP} />
+                        {f.hint && <div style={{color:T.textDim,fontSize:10,marginTop:3}}>{f.hint}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-
-          {/* ── COMPANY ── */}
+          )}
           {settingsTab==="company" && (
             <div>
               <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#1e40af"}}>
-                💡 Company info appears on the <b>Client Quote</b> printout. Fill once, save, and it auto-loads.
+                💡 Company info appears on the <b>Client Quote</b> printout. Fill once, save, and it syncs for everyone.
               </div>
               {[
                 {label:"Company / Business Name",key:"name",placeholder:"JSS THE PRINT ZONE"},
@@ -956,26 +1014,19 @@ _This is an estimated amount. Final may vary._`;
               ].map(f=>(
                 <div key={f.key} style={{marginBottom:12}}>
                   <label style={{...LBL}}>{f.label}</label>
-                  <input value={companyInfo[f.key]||""} placeholder={f.placeholder}
-                    onChange={e=>setCompanyInfo(p=>({...p,[f.key]:e.target.value}))}
-                    style={BASE_INP} />
+                  <input value={companyInfo[f.key]||""} placeholder={f.placeholder} onChange={e=>setCompanyInfo(p=>({...p,[f.key]:e.target.value}))} style={BASE_INP} />
                 </div>
               ))}
               <div style={{marginBottom:12}}>
                 <label style={{...LBL}}>Default Terms & Conditions</label>
-                <textarea value={companyInfo.terms||""} rows={4}
-                  placeholder={"50% advance required\nGST extra as applicable\nValid for 15 days"}
-                  onChange={e=>setCompanyInfo(p=>({...p,terms:e.target.value}))}
-                  style={{...BASE_INP,resize:"vertical",lineHeight:1.8}} />
+                <textarea value={companyInfo.terms||""} rows={4} placeholder={"50% advance required\nGST extra as applicable\nValid for 15 days"} onChange={e=>setCompanyInfo(p=>({...p,terms:e.target.value}))} style={{...BASE_INP,resize:"vertical",lineHeight:1.8}} />
               </div>
             </div>
           )}
-
-          {/* ── CUSTOM TYPES ── */}
           {settingsTab==="custom" && (
             <div>
               <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#1e40af"}}>
-                💡 Add custom UV / Lamination / Foiling types. Rate is <b>per sheet</b>.
+                💡 Add custom UV / Lamination / Foiling types. Rate is <b>per sheet</b>. Custom types also sync to all users on Save.
               </div>
               {[
                 {label:"UV Coating — Custom Types",icon:"💡",color:"#0369a1",list:customUVTypes,which:"uv",newVal:newUVType,setNew:setNewUVType},
@@ -988,23 +1039,18 @@ _This is an estimated amount. Final may vary._`;
                     <span style={{fontSize:12,fontWeight:700,color,textTransform:"uppercase",letterSpacing:.8}}>{label}</span>
                   </div>
                   <div style={{padding:"12px 14px"}}>
-                    {list.length>0 && <div style={{marginBottom:10}}>
-                      {list.map(t=>(
-                        <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#f5f8ff",borderRadius:6,marginBottom:6,border:`1px solid ${T.border}`}}>
-                          <span style={{flex:2,fontSize:13,fontWeight:600,color:T.text}}>{t.name}</span>
-                          <span style={{fontSize:12,color:T.textMid,fontFamily:"monospace"}}>₹{t.ratePerSheet}/sheet</span>
-                          <button onClick={()=>removeCustomType(which,t.id)} style={{background:"#fef2f2",border:"1.5px solid #fecaca",color:"#dc2626",width:26,height:26,borderRadius:5,cursor:"pointer",fontSize:14,fontFamily:"inherit",flexShrink:0,padding:0}}>×</button>
-                        </div>
-                      ))}
-                    </div>}
+                    {list.length>0 && <div style={{marginBottom:10}}>{list.map(t=>(
+                      <div key={t.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#f5f8ff",borderRadius:6,marginBottom:6,border:`1px solid ${T.border}`}}>
+                        <span style={{flex:2,fontSize:13,fontWeight:600,color:T.text}}>{t.name}</span>
+                        <span style={{fontSize:12,color:T.textMid,fontFamily:"monospace"}}>₹{t.ratePerSheet}/sheet</span>
+                        <button onClick={()=>removeCustomType(which,t.id)} style={{background:"#fef2f2",border:"1.5px solid #fecaca",color:"#dc2626",width:26,height:26,borderRadius:5,cursor:"pointer",fontSize:14,fontFamily:"inherit",flexShrink:0,padding:0}}>×</button>
+                      </div>
+                    ))}</div>}
                     {list.length===0 && <div style={{color:T.textDim,fontSize:12,marginBottom:8,fontStyle:"italic"}}>No custom types added yet.</div>}
                     <div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
                       <div style={{flex:3}}>
                         <label style={{...LBL}}>Type Name</label>
-                        <input value={newVal.name} placeholder="e.g. Soft Touch..."
-                          onChange={e=>setNew(p=>({...p,name:e.target.value}))}
-                          onKeyDown={e=>e.key==="Enter"&&addCustomType(which)}
-                          style={BASE_INP} />
+                        <input value={newVal.name} placeholder="e.g. Soft Touch..." onChange={e=>setNew(p=>({...p,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addCustomType(which)} style={BASE_INP} />
                       </div>
                       <div style={{flex:1}}>
                         <label style={{...LBL}}>Rate/Sheet (₹)</label>
@@ -1017,64 +1063,44 @@ _This is an estimated amount. Final may vary._`;
               ))}
             </div>
           )}
-
-          {/* ── GOOGLE SHEETS ── */}
           {settingsTab==="sheets" && (
             <div>
+              <div style={{background:"#fef3c7",border:"1px solid #fde68a",borderRadius:8,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#92400e",lineHeight:1.7}}>
+                ⚠️ <b>Action Required:</b> Your Google Sheets URL is already hardcoded. But to enable <b>cloud rate sync</b>, you must <b>update your Apps Script</b> with the new code below and create a <b>New Deployment</b>. The old deployment won't support rate syncing.
+              </div>
               <div style={{background:"#ecfdf5",border:"1px solid #6ee7b7",borderRadius:8,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#065f46",lineHeight:1.7}}>
-                <b>🔗 Connect Google Sheets to save & search all your estimates.</b><br/>
-                Follow these steps once:
+                <b>Steps to update your Apps Script:</b>
                 <ol style={{marginTop:8,paddingLeft:20}}>
-                  <li>Open <b>sheets.google.com</b> → create a new spreadsheet → name it anything.</li>
-                  <li>Go to <b>Extensions → Apps Script</b></li>
-                  <li>Delete default code, paste the code below, click 💾 Save.</li>
-                  <li>Click <b>Deploy → New Deployment → Web App</b></li>
-                  <li>Set <b>Execute as: Me</b> &amp; <b>Who has access: Anyone</b> → Deploy → Authorize.</li>
-                  <li>Copy the <b>Web App URL</b> and paste it below. Click Save &amp; Apply.</li>
+                  <li>Open your Google Sheet → <b>Extensions → Apps Script</b></li>
+                  <li>Delete all existing code, paste the updated code below.</li>
+                  <li>Click 💾 Save, then <b>Deploy → New Deployment → Web App</b></li>
+                  <li>Set <b>Execute as: Me</b> &amp; <b>Who has access: Anyone</b> → Deploy.</li>
+                  <li>Copy the new Web App URL and paste it below if it changed.</li>
                 </ol>
               </div>
-
               <div style={{marginBottom:16}}>
                 <label style={{...LBL}}>Apps Script Web App URL</label>
-                <input value={sheetsUrl} onChange={e=>setSheetsUrl(e.target.value)}
-                  placeholder="https://script.google.com/macros/s/XXXXX/exec"
-                  style={{...BASE_INP,fontFamily:"monospace",fontSize:12}} />
+                <input value={sheetsUrl} onChange={e=>setSheetsUrl(e.target.value)} placeholder="https://script.google.com/macros/s/XXXXX/exec" style={{...BASE_INP,fontFamily:"monospace",fontSize:12}} />
                 {sheetsUrl && <div style={{fontSize:10,color:"#16a34a",marginTop:3}}>✅ URL configured</div>}
               </div>
-
               <div style={{borderRadius:8,border:`1.5px solid ${T.border}`,overflow:"hidden",marginBottom:8}}>
                 <div style={{background:T.bgSection,padding:"9px 14px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:12,fontWeight:700,color:"#059669"}}>📋 Apps Script Code — Copy &amp; Paste</span>
-                  <button onClick={()=>{
-                    if(navigator.clipboard) navigator.clipboard.writeText(APPS_SCRIPT_CODE).then(()=>alert("✅ Code copied! Paste in Apps Script editor."));
-                  }} style={{background:"#059669",color:"#fff",border:"none",padding:"4px 12px",borderRadius:5,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                    📋 Copy Code
-                  </button>
+                  <span style={{fontSize:12,fontWeight:700,color:"#059669"}}>📋 Updated Apps Script Code — Copy &amp; Replace</span>
+                  <button onClick={()=>{if(navigator.clipboard) navigator.clipboard.writeText(APPS_SCRIPT_CODE).then(()=>alert("✅ Code copied! Paste in Apps Script editor."));}} style={{background:"#059669",color:"#fff",border:"none",padding:"4px 12px",borderRadius:5,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Copy Code</button>
                 </div>
-                <pre style={{padding:"12px 14px",fontSize:10,lineHeight:1.6,overflowX:"auto",color:"#1e2d50",background:"#f8faff",maxHeight:220,margin:0}}>
-                  {APPS_SCRIPT_CODE}
-                </pre>
-              </div>
-
-              <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:7,padding:"10px 14px",fontSize:11,color:"#92400e"}}>
-                ⚠️ <b>Note:</b> After deploying, if you edit the script, create a <b>New Deployment</b> each time — don't redeploy the same version.
+                <pre style={{padding:"12px 14px",fontSize:10,lineHeight:1.6,overflowX:"auto",color:"#1e2d50",background:"#f8faff",maxHeight:220,margin:0}}>{APPS_SCRIPT_CODE}</pre>
               </div>
             </div>
           )}
         </div>
-
         <div style={{padding:"14px 22px",borderTop:`1px solid ${T.border}`,background:T.bgSub,flexShrink:0}}>
           <div style={{display:"flex",gap:8,marginBottom:6}}>
-            <button onClick={handleSaveSettings} className="btn-primary"
-              style={{flex:3,background:T.primary,color:"#fff",border:"none",padding:12,borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-              💾 Save &amp; Apply
+            <button onClick={handleSaveSettings} className="btn-primary" style={{flex:3,background:T.primary,color:"#fff",border:"none",padding:12,borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              ☁️ Save &amp; Sync to All Users
             </button>
-            <button onClick={handleResetRates}
-              style={{flex:1,background:"#fef2f2",color:"#dc2626",border:"1.5px solid #fecaca",padding:12,borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-              ♻️ Reset
-            </button>
+            <button onClick={handleResetRates} style={{flex:1,background:"#fef2f2",color:"#dc2626",border:"1.5px solid #fecaca",padding:12,borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>♻️ Reset</button>
           </div>
-          <div style={{fontSize:11,color:"#4a6494",textAlign:"center"}}>Rates &amp; settings auto-load next time</div>
+          <div style={{fontSize:11,color:"#4a6494",textAlign:"center"}}>Rates save locally + sync to Google Sheets for all users</div>
         </div>
       </div>
     </div>
@@ -1095,35 +1121,38 @@ _This is an estimated amount. Final may vary._`;
             </div>
           </div>
           <div style={{display:"flex",gap:7,alignItems:"center"}}>
+            {/* Cloud sync status */}
+            {ratesSyncing && (
+              <div className="sync-pulse" style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.8)",fontSize:10,padding:"3px 10px",borderRadius:12,fontWeight:600}}>
+                ☁️ Syncing rates...
+              </div>
+            )}
+            {ratesSynced && (
+              <div style={{background:"rgba(22,163,74,.25)",border:"1px solid rgba(22,163,74,.4)",color:"#86efac",fontSize:10,padding:"3px 10px",borderRadius:12,fontWeight:600}}>
+                ✅ Rates synced
+              </div>
+            )}
+            {ratesSyncErr && (
+              <div style={{background:"rgba(220,38,38,.2)",border:"1px solid rgba(220,38,38,.3)",color:"#fca5a5",fontSize:10,padding:"3px 10px",borderRadius:12,fontWeight:600}}>
+                ⚠️ Offline rates
+              </div>
+            )}
             {draftSaved && (
               <div className="draft-pill" style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.7)",fontSize:10,padding:"3px 10px",borderRadius:12,fontWeight:600}}>
                 💾 Draft saved
               </div>
             )}
-            <button onClick={()=>{setShowRecords(true); fetchRecords("");}} className="btn-primary"
-              style={{background:"rgba(255,255,255,.13)",border:"1.5px solid rgba(255,255,255,.25)",color:"#fff",padding:"7px 14px",borderRadius:7,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-              📂 Records
-            </button>
-            <button onClick={handleNewJob}
-              style={{background:"rgba(255,255,255,.13)",border:"1.5px solid rgba(255,255,255,.25)",color:"#fff",padding:"7px 14px",borderRadius:7,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-              ➕ New Job
-            </button>
-            <button onClick={()=>setShowGuide(true)} className="btn-primary"
-              style={{background:"rgba(255,255,255,.13)",border:"1.5px solid rgba(255,255,255,.25)",color:"#fff",padding:"7px 14px",borderRadius:7,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-              ❓ Guide
-            </button>
-            <button onClick={()=>setShowSettings(true)} className="btn-primary"
-              style={{background:"rgba(255,255,255,.13)",border:"1.5px solid rgba(255,255,255,.25)",color:"#fff",padding:"7px 14px",borderRadius:7,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-              ⚙️ Settings
-            </button>
+            <button onClick={()=>{setShowRecords(true); fetchRecords("");}} className="btn-primary" style={{background:"rgba(255,255,255,.13)",border:"1.5px solid rgba(255,255,255,.25)",color:"#fff",padding:"7px 14px",borderRadius:7,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>📂 Records</button>
+            <button onClick={handleNewJob} style={{background:"rgba(255,255,255,.13)",border:"1.5px solid rgba(255,255,255,.25)",color:"#fff",padding:"7px 14px",borderRadius:7,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>➕ New Job</button>
+            <button onClick={()=>setShowGuide(true)} className="btn-primary" style={{background:"rgba(255,255,255,.13)",border:"1.5px solid rgba(255,255,255,.25)",color:"#fff",padding:"7px 14px",borderRadius:7,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>❓ Guide</button>
+            <button onClick={()=>setShowSettings(true)} className="btn-primary" style={{background:"rgba(255,255,255,.13)",border:"1.5px solid rgba(255,255,255,.25)",color:"#fff",padding:"7px 14px",borderRadius:7,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>⚙️ Settings</button>
           </div>
         </div>
       </div>
 
       {/* TOAST */}
       {saveMsg && (
-        <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:3000,
-          background:"#1e2d50",color:"#fff",padding:"12px 24px",borderRadius:10,fontSize:13,fontWeight:600,boxShadow:"0 8px 24px rgba(0,0,0,.25)"}}>
+        <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:3000,background:"#1e2d50",color:"#fff",padding:"12px 24px",borderRadius:10,fontSize:13,fontWeight:600,boxShadow:"0 8px 24px rgba(0,0,0,.25)"}}>
           {saveMsg}
         </div>
       )}
@@ -1139,12 +1168,8 @@ _This is an estimated amount. Final may vary._`;
             &nbsp;|&nbsp; <span style={{color:"#3b70e8",cursor:"pointer",textDecoration:"underline"}} onClick={()=>setShowSettings(true)}>Change in Settings ⚙️</span>
           </span>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            <span style={{fontSize:11,color:"#dc2626",background:"#fef2f2",border:"1px solid #fecaca",padding:"3px 10px",borderRadius:6,fontWeight:700}}>
-              🔒 30% Margin Applied (Client Price)
-            </span>
-            <span style={{fontSize:11,color:"#16a34a",background:"#f0fdf4",border:"1px solid #bbf7d0",padding:"3px 10px",borderRadius:6,fontWeight:600}}>
-              {draft?.savedAt ? "💾 Draft restored" : "⚙️ Set rates in Settings"}
-            </span>
+            <span style={{fontSize:11,color:"#dc2626",background:"#fef2f2",border:"1px solid #fecaca",padding:"3px 10px",borderRadius:6,fontWeight:700}}>🔒 30% Margin Applied (Client Price)</span>
+            <span style={{fontSize:11,color:"#059669",background:"#ecfdf5",border:"1px solid #6ee7b7",padding:"3px 10px",borderRadius:6,fontWeight:600}}>☁️ Rate changes sync to all users</span>
           </div>
         </div>
 
@@ -1185,32 +1210,21 @@ _This is an estimated amount. Final may vary._`;
                 {paperCalc.rows.map((row,idx)=>(
                   <div key={row.id} className="hover-row" style={{display:"grid",gridTemplateColumns:"68px 68px 60px 86px 90px 90px 90px 96px 102px 28px",gap:6,minWidth:720,marginBottom:6,alignItems:"center",padding:"3px 2px",borderRadius:6}}>
                     {["length","width","gsm"].map(f=>(
-                      <input key={f} type="number" value={row[f]} placeholder="0"
-                        onChange={e=>{const r=[...paperRows];r[idx]={...r[idx],[f]:e.target.value};setPaperRows(r);}}
-                        style={{...BASE_INP,padding:"7px 8px",fontSize:12}} />
+                      <input key={f} type="number" value={row[f]} placeholder="0" onChange={e=>{const r=[...paperRows];r[idx]={...r[idx],[f]:e.target.value};setPaperRows(r);}} style={{...BASE_INP,padding:"7px 8px",fontSize:12}} />
                     ))}
-                    <select value={row.unit} onChange={e=>{const r=[...paperRows];r[idx]={...r[idx],unit:e.target.value};setPaperRows(r);}}
-                      style={{...BASE_INP,padding:"7px 8px",fontSize:12,cursor:"pointer"}}>
+                    <select value={row.unit} onChange={e=>{const r=[...paperRows];r[idx]={...r[idx],unit:e.target.value};setPaperRows(r);}} style={{...BASE_INP,padding:"7px 8px",fontSize:12,cursor:"pointer"}}>
                       <option>Packet</option><option>Ream</option><option>Gross</option>
                     </select>
-                    <input type="number" value={row.sheetQty} placeholder="e.g. 5000"
-                      onChange={e=>{const r=[...paperRows];r[idx]={...r[idx],sheetQty:e.target.value};setPaperRows(r);}}
-                      style={{...BASE_INP,padding:"7px 8px",fontSize:12,borderColor:row.sheetQty?"#c5d8f8":"#fbbf24"}} />
+                    <input type="number" value={row.sheetQty} placeholder="e.g. 5000" onChange={e=>{const r=[...paperRows];r[idx]={...r[idx],sheetQty:e.target.value};setPaperRows(r);}} style={{...BASE_INP,padding:"7px 8px",fontSize:12,borderColor:row.sheetQty?"#c5d8f8":"#fbbf24"}} />
                     <input value={row.sheetQty?`${row.equivUnits} ${row.unit==="Packet"?"Pkts":row.unit==="Ream"?"Reams":"Gross"}`:"—"} readOnly style={{...BASE_RO,padding:"7px 8px",fontSize:11}} />
                     <input value={row.weight?row.weight.toFixed(4):"0.0000"} readOnly style={{...BASE_RO,padding:"7px 8px",fontSize:12}} />
-                    <input type="number" value={row.ratePerKg} placeholder="₹/Kg"
-                      onChange={e=>{const r=[...paperRows];r[idx]={...r[idx],ratePerKg:e.target.value};setPaperRows(r);}}
-                      style={{...BASE_INP,padding:"7px 8px",fontSize:12}} />
+                    <input type="number" value={row.ratePerKg} placeholder="₹/Kg" onChange={e=>{const r=[...paperRows];r[idx]={...r[idx],ratePerKg:e.target.value};setPaperRows(r);}} style={{...BASE_INP,padding:"7px 8px",fontSize:12}} />
                     <input value={fmt(row.price)} readOnly style={{...BASE_RO,padding:"7px 8px",fontSize:12,color:T.success}} />
-                    <button onClick={()=>setPaperRows(paperRows.filter((_,i)=>i!==idx))}
-                      style={{width:28,height:32,background:"#fef2f2",border:"1.5px solid #fecaca",color:T.danger,borderRadius:6,cursor:"pointer",fontSize:16,padding:0,fontFamily:"inherit"}}>×</button>
+                    <button onClick={()=>setPaperRows(paperRows.filter((_,i)=>i!==idx))} style={{width:28,height:32,background:"#fef2f2",border:"1.5px solid #fecaca",color:T.danger,borderRadius:6,cursor:"pointer",fontSize:16,padding:0,fontFamily:"inherit"}}>×</button>
                   </div>
                 ))}
               </div>
-              <button onClick={()=>setPaperRows([...paperRows,{id:Date.now(),length:"",width:"",gsm:"",unit:"Packet",sheetQty:"",ratePerKg:""}])}
-                style={{background:T.bgSection,border:`1.5px dashed ${T.primary}`,color:T.primary,padding:"6px 14px",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:600,marginTop:6,fontFamily:"inherit"}}>
-                + Add Paper Row
-              </button>
+              <button onClick={()=>setPaperRows([...paperRows,{id:Date.now(),length:"",width:"",gsm:"",unit:"Packet",sheetQty:"",ratePerKg:""}])} style={{background:T.bgSection,border:`1.5px dashed ${T.primary}`,color:T.primary,padding:"6px 14px",borderRadius:6,cursor:"pointer",fontSize:12,fontWeight:600,marginTop:6,fontFamily:"inherit"}}>+ Add Paper Row</button>
               <div style={{height:1,background:"#eef2fb",margin:"12px 0"}} />
               <div style={{display:"flex",gap:14,justifyContent:"flex-end",flexWrap:"wrap"}}>
                 <div style={{textAlign:"right"}}>
@@ -1435,9 +1449,7 @@ _This is an estimated amount. Final may vary._`;
                   <div style={{flex:3}} />
                 </Row>
               )}
-              {dieCutting.rateMode==="Per 1000 Sheets"
-                ?<Hint text={`₹${dieCutting.rate} × ${dieCutting.sheetQty||0} ÷ 1000 = ₹${fmt(dieCutTotal)}`} />
-                :<Hint text={`Fixed Charge: ₹${dieCutting.fixedCharge||0}`} />}
+              {dieCutting.rateMode==="Per 1000 Sheets"?<Hint text={`₹${dieCutting.rate} × ${dieCutting.sheetQty||0} ÷ 1000 = ₹${fmt(dieCutTotal)}`} />:<Hint text={`Fixed Charge: ₹${dieCutting.fixedCharge||0}`} />}
             </SectionCard>
 
             {/* ══ PASTING ══ */}
@@ -1489,9 +1501,7 @@ _This is an estimated amount. Final may vary._`;
                   <div style={{flex:3}} />
                 </Row>
               )}
-              {packaging.mode==="Per Carton"
-                ?<Hint text={`${packaging.numCartons||0} Cartons × ₹${packaging.ratePerCarton} = ₹${fmt(packagingTotal)}`} />
-                :<Hint text={`Fixed: ₹${packaging.fixedPrice||0}`} />}
+              {packaging.mode==="Per Carton"?<Hint text={`${packaging.numCartons||0} Cartons × ₹${packaging.ratePerCarton} = ₹${fmt(packagingTotal)}`} />:<Hint text={`Fixed: ₹${packaging.fixedPrice||0}`} />}
             </SectionCard>
 
             {/* ══ DISPATCH ══ */}
@@ -1510,13 +1520,11 @@ _This is an estimated amount. Final may vary._`;
               <Row>
                 <div style={{flex:3,minWidth:200}}>
                   <label style={LBL}>Description / Remark</label>
-                  <input type="text" value={extraCharge.description} placeholder="e.g. Urgent charges, Special handling..."
-                    onChange={e=>setExtraCharge({...extraCharge,description:e.target.value})} style={BASE_INP} />
+                  <input type="text" value={extraCharge.description} placeholder="e.g. Urgent charges, Special handling..." onChange={e=>setExtraCharge({...extraCharge,description:e.target.value})} style={BASE_INP} />
                 </div>
                 <div style={{flex:1,minWidth:140}}>
                   <label style={LBL}>Amount (₹)</label>
-                  <input type="number" value={extraCharge.amount} placeholder="0"
-                    onChange={e=>setExtraCharge({...extraCharge,amount:e.target.value})} style={BASE_INP} />
+                  <input type="number" value={extraCharge.amount} placeholder="0" onChange={e=>setExtraCharge({...extraCharge,amount:e.target.value})} style={BASE_INP} />
                 </div>
                 <Field label="Total" value={fmt(extraChargeTotal)} readOnly />
               </Row>
@@ -1534,7 +1542,6 @@ _This is an estimated amount. Final may vary._`;
                 {clientName && <div style={{color:"rgba(255,255,255,.7)",fontSize:12,marginTop:2}}>{clientName}</div>}
                 {jobDate    && <div style={{color:"rgba(255,255,255,.5)",fontSize:11,marginTop:2}}>{jobDate}</div>}
               </div>
-
               <div style={{padding:"10px 16px 4px"}}>
                 <div style={{fontSize:9,fontWeight:800,color:"#8ca5cc",textTransform:"uppercase",letterSpacing:1.2,marginBottom:4}}>Internal Cost (Actual)</div>
                 {summaryItems.length===0
@@ -1547,12 +1554,10 @@ _This is an estimated amount. Final may vary._`;
                   ))
                 }
               </div>
-
               <div style={{background:"#f5f8ff",margin:"6px 12px 0",borderRadius:7,padding:"10px 14px",border:`1px solid ${T.border}`}}>
                 <div style={{color:T.textMid,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:1.2,marginBottom:2}}>Your Cost</div>
                 <div style={{color:T.textMid,fontFamily:"monospace",fontSize:20,fontWeight:800}}>₹{fmt(grandTotal)}</div>
               </div>
-
               <div style={{background:T.bgSection,margin:"8px 12px 12px",borderRadius:8,padding:"14px 16px",border:`1.5px solid ${T.border}`}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
                   <div style={{color:T.textMid,fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:1.5}}>Client Price (30% Margin)</div>
@@ -1560,22 +1565,11 @@ _This is an estimated amount. Final may vary._`;
                 </div>
                 <div style={{color:T.primary,fontFamily:"monospace",fontSize:26,fontWeight:800}}>₹{fmt(grandTotalWithMargin)}</div>
               </div>
-
               <div style={{padding:"0 12px 14px",display:"flex",flexDirection:"column",gap:8}}>
-                <button onClick={()=>setShowQuote(true)} className="btn-primary"
-                  style={{width:"100%",background:"#1e2d50",color:"#fff",border:"none",padding:10,borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                  📄 Client Slip / WhatsApp
-                </button>
-                <button onClick={()=>window.print()} className="btn-primary"
-                  style={{width:"100%",background:T.primary,color:"#fff",border:"none",padding:10,borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                  🖨 Print / Save PDF
-                </button>
-                <button onClick={copySummary}
-                  style={{width:"100%",background:T.bgSection,color:T.primary,border:`1.5px solid ${T.border}`,padding:9,borderRadius:7,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-                  📋 Copy Summary
-                </button>
-                <button onClick={saveToSheets}
-                  style={{width:"100%",background:"#ecfdf5",color:"#059669",border:"1.5px solid #6ee7b7",padding:9,borderRadius:7,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                <button onClick={()=>setShowQuote(true)} className="btn-primary" style={{width:"100%",background:"#1e2d50",color:"#fff",border:"none",padding:10,borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📄 Client Slip / WhatsApp</button>
+                <button onClick={()=>window.print()} className="btn-primary" style={{width:"100%",background:T.primary,color:"#fff",border:"none",padding:10,borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🖨 Print / Save PDF</button>
+                <button onClick={copySummary} style={{width:"100%",background:T.bgSection,color:T.primary,border:`1.5px solid ${T.border}`,padding:9,borderRadius:7,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>📋 Copy Summary</button>
+                <button onClick={saveToSheets} style={{width:"100%",background:"#ecfdf5",color:"#059669",border:"1.5px solid #6ee7b7",padding:9,borderRadius:7,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
                   {sheetsSaving?"⏳ Saving...":"📊 Save to Google Sheets"}
                 </button>
               </div>
@@ -1590,7 +1584,7 @@ _This is an estimated amount. Final may vary._`;
       {showSettings && <SettingsModal />}
       {showRecords  && <RecordsModal />}
 
-      {/* HOW TO USE */}
+      {/* GUIDE */}
       {showGuide && (
         <div style={{position:"fixed",inset:0,background:"rgba(15,30,70,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{background:T.bgCard,borderRadius:14,width:520,maxHeight:"85vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(15,30,70,.3)",border:`1.5px solid ${T.border}`}}>
@@ -1602,14 +1596,14 @@ _This is an estimated amount. Final may vary._`;
               {[
                 ["1️⃣","Fill Job Info","Job name, client name, date and quote number at the top."],
                 ["2️⃣","Paper — Sheet Qty","Enter total sheets directly (e.g. 5000). Equivalent reams/packets shown automatically."],
-                ["3️⃣","30% Margin","Applied automatically. Your internal cost and client price are shown separately in the summary. Client slip shows only the marked-up price."],
-                ["4️⃣","Auto Draft Save","Your work is saved every second automatically in the browser. Refreshing restores your last session."],
-                ["5️⃣","Google Sheets","Go to ⚙️ Settings → Google Sheets. Follow the one-time setup to connect. After that, click 'Save to Sheets' to log every estimate with a unique ID."],
-                ["6️⃣","Records Search","Click 📂 Records in the nav. Search by job name, client, date or quote number. Click any record to load it back — all sections (paper, plates, printing etc.) are fully restored."],
-                ["7️⃣","UV / Lamination","'Per Sheet' mode available. Custom types via ⚙️ Settings → Custom Types."],
-                ["8️⃣","Foiling — 2 Modes","Area Based (L×W×rate×blocks×sheets) or Per Sheet."],
-                ["9️⃣","Die Block — 3 Modes","Rate per Block, Rate per sq inch, or Fixed Price."],
-                ["🔟","Client Slip","📄 Client Slip shows breakdown with 30% margin applied — no 'margin' label shown."],
+                ["3️⃣","30% Margin","Applied automatically. Internal cost and client price shown separately. Client slip shows only marked-up price."],
+                ["4️⃣","Auto Draft Save","Your work auto-saves every second in the browser. Refreshing restores your session."],
+                ["5️⃣","☁️ Cloud Rate Sync","Go to ⚙️ Settings → Rates. Change any rate → click 'Save & Sync'. Rates are saved to Google Sheets and automatically loaded for EVERYONE who opens the app."],
+                ["6️⃣","First Time Setup","Update your Apps Script with the new code (Settings → Google Sheets tab). Create a New Deployment once. After that, rate sync is fully automatic."],
+                ["7️⃣","Records","Click 📂 Records. Search by job name, client, date or ID. Click any record to fully restore it."],
+                ["8️⃣","UV / Lamination","'Per Sheet' mode available. Add custom types via ⚙️ Settings → Custom Types (also synced)."],
+                ["9️⃣","Foiling — 2 Modes","Area Based (L×W×rate×blocks×sheets) or Per Sheet."],
+                ["🔟","Client Slip","📄 Client Slip shows breakdown with 30% margin — no margin label visible to client."],
               ].map(([num,title,desc])=>(
                 <div key={title} style={{display:"flex",gap:14,marginBottom:16,alignItems:"flex-start"}}>
                   <span style={{fontSize:22,flexShrink:0}}>{num}</span>
@@ -1621,10 +1615,7 @@ _This is an estimated amount. Final may vary._`;
               ))}
             </div>
             <div style={{padding:"14px 22px",borderTop:`1px solid ${T.border}`,background:T.bgSub}}>
-              <button onClick={()=>setShowGuide(false)} className="btn-primary"
-                style={{width:"100%",background:T.primary,color:"#fff",border:"none",padding:12,borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-                Got it! Let's Start ✓
-              </button>
+              <button onClick={()=>setShowGuide(false)} className="btn-primary" style={{width:"100%",background:T.primary,color:"#fff",border:"none",padding:12,borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Got it! Let's Start ✓</button>
             </div>
           </div>
         </div>
