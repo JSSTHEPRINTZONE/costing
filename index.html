@@ -66,7 +66,7 @@ const DEFAULTS = {
   plates:        { enabled: false, normalRate: 250, normalQty: "", heatingRate: 320, heatingQty: "" },
   printing:      { enabled: false, type: "Normal", numColors: 4, paperQty: "", specialColors: 0, runCharge: 500, inkCharge: 0, rateMode: "Per 1000 Sheets", tier1000: 1200, tier5000: 1000, tier10000: 900, tierAbove: 800, ledRate: 3, pantoneRate: 300 },
   varnish:       { enabled: false, length: "", width: "", sheetQty: "", divisor: 4, paisa: 0.01 },
-  uv:            { enabled: false, type: "Full UV", length: "", width: "", sheetQty: "", spotPerSheet: 1.5, spotInitial: 1000, fullUVDivisor: 4, hybridUVDivisor: 2.5, uvPaisa: 0.01, perSheetRate: 5 },
+  uv:            { enabled: false, type: "Full UV", length: "", width: "", sheetQty: "", spotPerSheet: 100, spotInitial: 1000, fullUVDivisor: 4, hybridUVDivisor: 2.5, uvPaisa: 0.01, perSheetRate: 5 },
   lamination:    { enabled: false, type: "Gloss", length: "", width: "", sheetQty: "", velvetRate: 8.28, glossDivisor: 3, glossPaisa: 0.01, mattDivisor: 1.5, mattPaisa: 0.01, perSheetRate: 6 },
   foilingBlock:  { enabled: false, length: "", width: "", rate: 1 },
   dieBlock:      { enabled: false, rateMode: "Rate per Block", numBlocks: 1, rate: 500, length: "", width: "", fixedPrice: "" },
@@ -701,8 +701,8 @@ function App() {
 
   /* ── COPY UTILS ── */
   const copySummary = () => {
-    const lines = summaryItems.map(([k,v])=>`${k.replace(/[^\w ]/g,"").trim()}: ₹${fmt(v*MARGIN)}`).join("\n");
-    const text = `COST ESTIMATE — ${quoteNo}\n${"=".repeat(32)}\n${jobName?"Job: "+jobName+"\n":""}${clientName?"Client: "+clientName+"\n":""}Date: ${jobDate}\n${"=".repeat(32)}\n${lines}\n${"─".repeat(32)}\nGRAND TOTAL: ₹${fmt(grandTotalWithMargin)}`;
+    const lines = summaryItems.map(([k,v])=>`${k.replace(/[^\w ]/g,"").trim()}: ₹${fmt(v)}`).join("\n");
+    const text = `COST ESTIMATE — ${quoteNo}\n${"=".repeat(32)}\n${jobName?"Job: "+jobName+"\n":""}${clientName?"Client: "+clientName+"\n":""}Date: ${jobDate}\n${"=".repeat(32)}\n${lines}\n${"─".repeat(32)}\nActual Total: ₹${fmt(grandTotal)}\nClient Price (30% margin): ₹${fmt(grandTotalWithMargin)}`;
     if(navigator.clipboard) navigator.clipboard.writeText(text).then(()=>alert("✅ Cost summary copied!"));
     else { const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); alert("✅ Copied!"); }
   };
@@ -795,13 +795,12 @@ function App() {
   /* ════════ QUOTE MODAL ════════ */
   const [slipShowBreakdown, setSlipShowBreakdown] = useState(false);
   const [slipRemark, setSlipRemark] = useState("");
+  const [itemQty, setItemQty] = useState("");
 
-  const copyWhatsApp = () => {
+  const copyWhatsAppClient = () => {
     const ci = companyInfo;
     const dateStr = new Date(jobDate).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
-    const breakdownLines = slipShowBreakdown
-      ? summaryItems.map(([k,v])=>`  • ${k.replace(/[^\w ]/g,"").trim()}: ₹${fmt(v*MARGIN)}`).join("\n") + "\n"
-      : "";
+    const perItemLine = n(itemQty)>0 ? `\n*Price per Item: ₹${fmt(grandTotalWithMargin/n(itemQty))}* (${fmtInt(n(itemQty))} items)` : "";
     const text =
 `*${ci.name||"JSS THE PRINT ZONE"}*${ci.phone?" | "+ci.phone:""}
 
@@ -812,11 +811,36 @@ function App() {
 *Client:* ${clientName||"—"}
 *Job:* ${jobName||"—"}
 ─────────────────────
-${breakdownLines}*Total Amount: ₹${fmt(grandTotalWithMargin)}*
+*Total Amount: ₹${fmt(grandTotalWithMargin)}*${perItemLine}
 ─────────────────────${slipRemark?"\n📝 "+slipRemark:""}
 
 _This is an estimated amount. Final may vary._`;
-    if(navigator.clipboard) navigator.clipboard.writeText(text).then(()=>alert("✅ WhatsApp text copied! Paste in chat."));
+    if(navigator.clipboard) navigator.clipboard.writeText(text).then(()=>alert("✅ Client WhatsApp copied!"));
+    else { const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); alert("✅ Copied!"); }
+  };
+
+  const copyWhatsAppBoss = () => {
+    const ci = companyInfo;
+    const dateStr = new Date(jobDate).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+    const lines = summaryItems.map(([k,v])=>`  • ${k.replace(/[^\w ]/g,"").trim()}: ₹${fmt(v)}`).join("\n");
+    const perItemLines = n(itemQty)>0
+      ? `\n─────────────────────\n📦 *Per Item Breakdown (${fmtInt(n(itemQty))} items)*\n  • Actual cost/item: ₹${fmt(grandTotal/n(itemQty))}\n  • Client price/item: ₹${fmt(grandTotalWithMargin/n(itemQty))}`
+      : "";
+    const text =
+`*${ci.name||"JSS THE PRINT ZONE"}* — INTERNAL
+─────────────────────
+*Slip No:* ${quoteNo}
+*Date:* ${dateStr}
+*Client:* ${clientName||"—"}
+*Job:* ${jobName||"—"}
+─────────────────────
+*COST BREAKDOWN (Actual)*
+${lines}
+─────────────────────
+*Actual Cost: ₹${fmt(grandTotal)}*
+*Client Price (30% margin): ₹${fmt(grandTotalWithMargin)}*${perItemLines}
+─────────────────────${slipRemark?"\n📝 "+slipRemark:""}`;
+    if(navigator.clipboard) navigator.clipboard.writeText(text).then(()=>alert("✅ Boss WhatsApp copied!"));
     else { const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); alert("✅ Copied!"); }
   };
 
@@ -836,7 +860,8 @@ _This is an estimated amount. Final may vary._`;
               <button onClick={()=>saveToSheets()} style={{background:sheetsSaved?"#16a34a":"#059669",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
                 {sheetsSaving?"⏳ Saving...":sheetsSaved?"✅ Saved!":"📊 Save to Sheets"}
               </button>
-              <button onClick={copyWhatsApp} style={{background:"#25D366",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📲 WhatsApp</button>
+              <button onClick={copyWhatsAppClient} style={{background:"#25D366",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📲 WA Client</button>
+              <button onClick={copyWhatsAppBoss} style={{background:"#128C7E",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📲 WA Boss</button>
               <button onClick={()=>window.print()} style={{background:"rgba(255,255,255,.18)",border:"1.5px solid rgba(255,255,255,.3)",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🖨 Print / PDF</button>
               <button onClick={()=>setShowQuote(false)} style={{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",width:30,height:30,borderRadius:6,fontSize:18,cursor:"pointer",fontFamily:"inherit"}}>×</button>
             </div>
@@ -886,18 +911,30 @@ _This is an estimated amount. Final may vary._`;
                   {summaryItems.map(([name,val],i)=>(
                     <tr key={name} style={{background:i%2===0?"#fff":"#f8faff"}}>
                       <td style={{padding:"8px 10px",color:"#1e2d50",fontWeight:600,borderBottom:"1px solid #eef2fb"}}>{name.replace(/[^\w ]/g,"").trim()}</td>
-                      <td style={{padding:"8px 10px",textAlign:"right",fontFamily:"monospace",fontWeight:700,color:"#1e2d50",borderBottom:"1px solid #eef2fb"}}>₹ {fmt(val * MARGIN)}</td>
+                      <td style={{padding:"8px 10px",textAlign:"right",fontFamily:"monospace",fontWeight:700,color:"#1e2d50",borderBottom:"1px solid #eef2fb"}}>₹ {fmt(val)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             )}
-            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:22}}>
+            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:n(itemQty)>0?10:22}}>
               <div style={{background:"#1a4fd6",borderRadius:9,padding:"15px 28px",textAlign:"right",minWidth:240}}>
                 <div style={{color:"rgba(255,255,255,.6)",fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:1.5,marginBottom:4}}>{slipShowBreakdown?"Grand Total":"Estimated Amount"}</div>
                 <div style={{color:"#fff",fontFamily:"monospace",fontSize:30,fontWeight:800,lineHeight:1}}>₹ {fmt(grandTotalWithMargin)}</div>
               </div>
             </div>
+            {n(itemQty)>0 && (
+              <div style={{display:"flex",justifyContent:"flex-end",marginBottom:22}}>
+                <div style={{background:"#fef3c7",border:"1.5px solid #fde68a",borderRadius:9,padding:"12px 28px",textAlign:"right",minWidth:240}}>
+                  <div style={{color:"#92400e",fontSize:9,fontWeight:700,textTransform:"uppercase",letterSpacing:1.5,marginBottom:4}}>
+                    Price per Item ({fmtInt(n(itemQty))} items)
+                  </div>
+                  <div style={{color:"#b45309",fontFamily:"monospace",fontSize:22,fontWeight:800,lineHeight:1}}>
+                    ₹ {fmt(grandTotalWithMargin/n(itemQty))} / item
+                  </div>
+                </div>
+              </div>
+            )}
             {slipRemark && (
               <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:7,padding:"10px 14px",marginBottom:18,fontSize:12,color:"#92400e"}}>
                 📝 <b>Note:</b> {slipRemark}
@@ -1457,22 +1494,22 @@ _This is an estimated amount. Final may vary._`;
               <div style={{background:"#f8faff",border:"1.5px solid #c5d8f8",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
                 <div style={{fontSize:11,fontWeight:800,color:T.primary,textTransform:"uppercase",letterSpacing:.8,marginBottom:8}}>🔒 Lock Pasting</div>
                 <Row>
-                  <Field label="Sheet Qty" value={pasting.lockQty} onChange={v=>setPasting({...pasting,lockQty:v})} />
-                  <Field label="Rate (₹/1000)" value={pasting.lockRate} onChange={v=>setPasting({...pasting,lockRate:v})} />
+                  <Field label="Box / Item Qty" value={pasting.lockQty} onChange={v=>setPasting({...pasting,lockQty:v})} />
+                  <Field label="Rate (₹/1000 items)" value={pasting.lockRate} onChange={v=>setPasting({...pasting,lockRate:v})} />
                   <div style={{flex:1,minWidth:85}}><label style={LBL}>Total</label><input value={fmt(pastingCalc.lock)} readOnly style={BASE_RO} /></div>
                   <div style={{flex:2}} />
                 </Row>
-                <Hint text={`₹${pasting.lockRate} × ${pasting.lockQty||0} ÷ 1000 = ₹${fmt(pastingCalc.lock)}`} />
+                <Hint text={`₹${pasting.lockRate} × ${pasting.lockQty||0} items ÷ 1000 = ₹${fmt(pastingCalc.lock)}`} />
               </div>
               <div style={{background:"#f8faff",border:"1.5px solid #c5d8f8",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
                 <div style={{fontSize:11,fontWeight:800,color:"#7c3aed",textTransform:"uppercase",letterSpacing:.8,marginBottom:8}}>↔️ Side Pasting</div>
                 <Row>
-                  <Field label="Sheet Qty" value={pasting.sideQty} onChange={v=>setPasting({...pasting,sideQty:v})} />
-                  <Field label="Rate (₹/1000)" value={pasting.sideRate} onChange={v=>setPasting({...pasting,sideRate:v})} />
+                  <Field label="Box / Item Qty" value={pasting.sideQty} onChange={v=>setPasting({...pasting,sideQty:v})} />
+                  <Field label="Rate (₹/1000 items)" value={pasting.sideRate} onChange={v=>setPasting({...pasting,sideRate:v})} />
                   <div style={{flex:1,minWidth:85}}><label style={LBL}>Total</label><input value={fmt(pastingCalc.side)} readOnly style={BASE_RO} /></div>
                   <div style={{flex:2}} />
                 </Row>
-                <Hint text={`₹${pasting.sideRate} × ${pasting.sideQty||0} ÷ 1000 = ₹${fmt(pastingCalc.side)}`} />
+                <Hint text={`₹${pasting.sideRate} × ${pasting.sideQty||0} items ÷ 1000 = ₹${fmt(pastingCalc.side)}`} />
               </div>
               <SubRow label="Lock Pasting" value={pastingCalc.lock} />
               <SubRow label="Side Pasting" value={pastingCalc.side} />
@@ -1530,6 +1567,60 @@ _This is an estimated amount. Final may vary._`;
               </Row>
               <Hint text="Any additional / miscellaneous charges" />
             </SectionCard>
+
+            {/* ══ PER ITEM PRICE CALCULATOR ══ */}
+            <div style={{background:"#fffbeb",borderRadius:10,marginBottom:10,overflow:"hidden",border:"1.5px solid #fde68a",boxShadow:"0 4px 16px rgba(180,83,9,.08)"}}>
+              <div style={{background:"#fef3c7",padding:"11px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1.5px solid #fde68a"}}>
+                <div style={{display:"flex",alignItems:"center",gap:9}}>
+                  <span style={{fontSize:17}}>📦</span>
+                  <span style={{color:"#92400e",fontWeight:800,fontSize:13}}>Per Item / Per Box Price</span>
+                </div>
+                {n(itemQty)>0 && (
+                  <span style={{color:"#b45309",fontFamily:"monospace",fontSize:13,fontWeight:800,background:"#fff",border:"1px solid #fde68a",padding:"2px 10px",borderRadius:6}}>
+                    ₹{fmt(grandTotalWithMargin/n(itemQty))} / item
+                  </span>
+                )}
+              </div>
+              <div style={{padding:"16px 18px 14px"}}>
+                <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:6,padding:"7px 12px",marginBottom:12,fontSize:11,color:"#1e40af"}}>
+                  💡 Enter the total number of items/boxes printed. Price per piece will be calculated from the final client price (with margin).
+                </div>
+                <Row>
+                  <div style={{flex:1,minWidth:160}}>
+                    <label style={LBL}>Total Items / Boxes</label>
+                    <input type="number" value={itemQty} placeholder="e.g. 4000 boxes"
+                      onChange={e=>setItemQty(e.target.value)}
+                      style={{...BASE_INP,fontSize:13}} />
+                  </div>
+                  <div style={{flex:1,minWidth:140}}>
+                    <label style={LBL}>Actual Cost / Item</label>
+                    <input value={n(itemQty)>0 ? "₹"+fmt(grandTotal/n(itemQty)) : "—"} readOnly style={{...BASE_RO,fontSize:13}} />
+                  </div>
+                  <div style={{flex:1,minWidth:140}}>
+                    <label style={LBL}>Client Price / Item (with margin)</label>
+                    <input value={n(itemQty)>0 ? "₹"+fmt(grandTotalWithMargin/n(itemQty)) : "—"} readOnly
+                      style={{...BASE_RO,fontSize:13,color:"#b45309",background:"#fffbeb",borderColor:"#fde68a"}} />
+                  </div>
+                  <div style={{flex:2}} />
+                </Row>
+                {n(itemQty)>0 && (
+                  <div style={{display:"flex",gap:10,marginTop:8,flexWrap:"wrap"}}>
+                    <div style={{flex:1,background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:7,padding:"10px 14px",textAlign:"center"}}>
+                      <div style={{fontSize:10,color:"#15803d",fontWeight:700,textTransform:"uppercase",letterSpacing:.8,marginBottom:3}}>Your Cost / Item</div>
+                      <div style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:"#15803d"}}>₹{fmt(grandTotal/n(itemQty))}</div>
+                    </div>
+                    <div style={{flex:1,background:"#fef3c7",border:"1px solid #fde68a",borderRadius:7,padding:"10px 14px",textAlign:"center"}}>
+                      <div style={{fontSize:10,color:"#92400e",fontWeight:700,textTransform:"uppercase",letterSpacing:.8,marginBottom:3}}>Client Price / Item</div>
+                      <div style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:"#b45309"}}>₹{fmt(grandTotalWithMargin/n(itemQty))}</div>
+                    </div>
+                    <div style={{flex:1,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"10px 14px",textAlign:"center"}}>
+                      <div style={{fontSize:10,color:"#1e40af",fontWeight:700,textTransform:"uppercase",letterSpacing:.8,marginBottom:3}}>Total Items</div>
+                      <div style={{fontFamily:"monospace",fontSize:18,fontWeight:800,color:"#1a4fd6"}}>{fmtInt(n(itemQty))}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
 
           </div>{/* end left col */}
 
