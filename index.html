@@ -648,7 +648,8 @@ function App() {
       setRecordsList(data.records||[]);
     } catch(err) {
       setRecordsList([]);
-      alert("Could not fetch records. Check your Apps Script URL.");
+      console.error("fetchRecords failed:", err);
+      alert("Could not fetch records.\n\nError: " + (err.message||err) + "\n\nDIAGNOSE:\nOpen your Apps Script URL with ?action=list appended in a new browser tab.\n  • If you see JSON (records: [...]) → frontend / CORS issue\n  • If you see an error page → redeploy your Apps Script\n  • If it asks for login → set Who-has-access to Anyone in deployment");
     }
     setRecordsLoading(false);
   };
@@ -819,9 +820,32 @@ function App() {
   };
 
   const emailClient = () => {
-    const { subject, body } = buildClientEmail();
-    const mailto = `mailto:${clientEmail||""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailto;
+    const ci = companyInfo;
+    const dateStr = new Date(jobDate).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+    /* Short body — mailto: URLs break at ~2000 chars. Full version goes via Copy Mail. */
+    const L = [];
+    L.push(`Dear ${clientName||"Sir/Madam"},`, "");
+    L.push("Please find our estimate below:", "");
+    L.push(`Estimate No : ${quoteNo}`);
+    L.push(`Date        : ${dateStr}`);
+    L.push(`Job         : ${jobName||"-"}`, "");
+    L.push(`Total       : Rs.${fmt(grandTotalWithMargin)}`);
+    if(n(itemQty)>0) L.push(`Per piece   : Rs.${fmt(grandTotalWithMargin/n(itemQty))} (${fmtInt(n(itemQty))} pcs)`);
+    if(estMOQ) L.push(`MOQ         : ${estMOQ}`);
+    L.push(`Lead time   : ${estLeadTime||"TBC"}`);
+    if(estDelivery) L.push(`Delivery    : ${new Date(estDelivery).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}`);
+    L.push(`Valid for   : ${estValidity||"15"} days`);
+    L.push(`Advance     : ${estAdvance||"50"}%`);
+    if(estGstExtra) L.push("Note: GST extra as applicable.");
+    if(slipRemark) L.push("", `Remark: ${slipRemark}`);
+    L.push("", "Regards,", ci.name||"JSS THE PRINT ZONE");
+    if(ci.phone) L.push(ci.phone);
+    const subject = `Estimate ${quoteNo} - ${jobName||"Print Job"}`;
+    const mailto = `mailto:${clientEmail||""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(L.join("\n"))}`;
+    /* Anchor-click is more reliable than location.href for mailto on Android/Windows */
+    const a = document.createElement("a");
+    a.href = mailto; a.style.display = "none";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
   };
 
   const copyClientEmail = () => {
