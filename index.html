@@ -841,11 +841,8 @@ function App() {
     L.push("", "Regards,", ci.name||"JSS THE PRINT ZONE");
     if(ci.phone) L.push(ci.phone);
     const subject = `Estimate ${quoteNo} - ${jobName||"Print Job"}`;
-    const mailto = `mailto:${clientEmail||""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(L.join("\n"))}`;
-    /* Anchor-click is more reliable than location.href for mailto on Android/Windows */
-    const a = document.createElement("a");
-    a.href = mailto; a.style.display = "none";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(clientEmail||"")}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(L.join("\n"))}`;
+    window.open(gmailUrl, "_blank");
   };
 
   const copyClientEmail = () => {
