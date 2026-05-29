@@ -43,24 +43,32 @@
 </head>
 <body>
 <div id="root"></div>
+<script>
+  /* Injected by Apps Script when serving the page (see doGet in Code.gs).
+     If you open this HTML directly (file://), APPS_URL is empty and the
+     user can paste the URL in Settings → Google Sheets like before. */
+  window.APPS_URL = "<?= appsUrl ?>";
+</script>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
 /* ══════════════════════════════════════════════════════════════
-   🔧 EASY CONFIG — EDIT THESE VALUES
-   ══════════════════════════════════════════════════════════════ */
+   🔧 APPS SCRIPT URL
+   ──────────────────────────────────────────────────────────────
+   When this page is served BY Apps Script (via doGet), the
+   deployment URL is injected into window.APPS_URL above. The
+   React app reads it here. No URL is hardcoded in this file,
+   so it's safe to commit to a public GitHub repo.
 
-/* Your Google Apps Script Web App URL — shared for ALL users */
-const HARDCODED_SHEETS_URL = "https://script.google.com/macros/s/AKfycbzdzKoB2yUr6csrMjBz1N0l1LEFV60pNbU8o-BZbm6-342Cki0ldbOzC8RI-nJiMC8q/exec";
+   If the file is opened directly (file://) APPS_URL is empty.
+   The user can still paste a URL in Settings → Google Sheets,
+   which then persists in localStorage.
+   ══════════════════════════════════════════════════════════════ */
+const HARDCODED_SHEETS_URL = (typeof window !== "undefined" && window.APPS_URL) || "";
 
 /* Margin multiplier: 1.30 = 30% markup shown to client */
 const MARGIN = 1.30;
 
-/* ══════════════════════════════════════════════════════════════
-   📊 DEFAULT RATES — EDIT HERE FOR FACTORY DEFAULTS
-   These only apply when no cloud rates have been saved yet.
-   Once you save rates in Settings, they sync to ALL users.
-   ══════════════════════════════════════════════════════════════ */
 const DEFAULTS = {
   paperSettings: { baseConst: 3100, reamsBase: 500 },
   plates:        { enabled: false, normalRate: 250, normalQty: "", heatingRate: 320, heatingQty: "" },
@@ -75,17 +83,9 @@ const DEFAULTS = {
   packaging:     { enabled: false, mode: "Per Carton", numCartons: "", ratePerCarton: 60, fixedPrice: "" },
   dispatch:      { enabled: false, fixedRate: 600 },
   extraCharge:   { enabled: false, description: "", amount: "" },
-  companyInfo:   {
-    name:    "JSS THE PRINT ZONE",
-    tagline: "Offset Printing",
-    address: "dsidc shed, 39, Scheme 1, Okhla Phase II, New Delhi, Delhi 110020",
-    phone: "", email: "", gstin: "", terms: ""
-  },
+  /* Blank by default — real values come from saved settings (synced via cloud rates). */
+  companyInfo:   { name: "", tagline: "", address: "", phone: "", email: "", gstin: "", terms: "" },
 };
-
-/* ══════════════════════════════════════════════════════════════
-   END OF EASY CONFIG
-   ══════════════════════════════════════════════════════════════ */
 
 const T = {
   bgPage:"#f0f5ff", bgCard:"#ffffff", bgHeader:"#1a4fd6",
@@ -223,7 +223,6 @@ function saveAllRates(data) {
   catch(e) { return false; }
 }
 
-/* ════════ DRAFT HELPERS ════════ */
 const DRAFT_KEY = "printcost_draft";
 function loadDraft() {
   try { const s=localStorage.getItem(DRAFT_KEY); return s?JSON.parse(s):null; } catch(e){ return null; }
@@ -232,7 +231,6 @@ function saveDraft(data) {
   try { localStorage.setItem(DRAFT_KEY, JSON.stringify({...data, savedAt: Date.now()})); } catch(e){}
 }
 
-/* ════════ UPDATED APPS SCRIPT CODE ════════ */
 const APPS_SCRIPT_CODE = `// ── PASTE THIS IN Google Apps Script (UPDATED VERSION) ──
 // ⚠️ Create a NEW deployment after replacing old code
 
@@ -240,7 +238,6 @@ const SHEET_NAME  = "JSS_Estimates";
 const RATES_SHEET = "JSS_Rates";
 
 function doGet(e) {
-  // ── Fetch saved rates (used on app load to sync all users) ──
   if (e.parameter.action === "getRates") {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = ss.getSheetByName(RATES_SHEET);
@@ -251,7 +248,6 @@ function doGet(e) {
     } catch(err) { return makeResponse({ rates: null }); }
   }
 
-  // ── Fetch estimate records ──
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_NAME);
   const q = (e.parameter.q || "").toLowerCase().trim();
@@ -271,7 +267,6 @@ function doPost(e) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const p = JSON.parse(e.postData.contents);
 
-    // ── Save rates (synced to all users on next load) ──
     if (p.type === "rates") {
       let sheet = ss.getSheetByName(RATES_SHEET);
       if (!sheet) {
@@ -289,7 +284,6 @@ function doPost(e) {
       return makeResponse({ success: true });
     }
 
-    // ── Save estimate record ──
     let sheet = ss.getSheetByName(SHEET_NAME);
     if (!sheet) {
       sheet = ss.insertSheet(SHEET_NAME);
@@ -305,7 +299,6 @@ function makeResponse(data) {
   return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
 }`;
 
-/* ════════════ APP ════════════ */
 function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showGuide, setShowGuide]       = useState(false);
@@ -315,22 +308,18 @@ function App() {
   const [settingsTab, setSettingsTab]   = useState("rates");
   const [draftSaved, setDraftSaved]     = useState(false);
 
-  /* Cloud rate sync state */
   const [ratesSyncing, setRatesSyncing] = useState(false);
   const [ratesSynced,  setRatesSynced]  = useState(false);
   const [ratesSyncErr, setRatesSyncErr] = useState(false);
 
-  /* Google Sheets URL — always starts with hardcoded value */
   const [sheetsUrl, setSheetsUrl] = useState(()=>localStorage.getItem("printcost_sheetsUrl")||HARDCODED_SHEETS_URL);
   const [sheetsSaving, setSheetsSaving] = useState(false);
   const [sheetsSaved, setSheetsSaved]   = useState(false);
 
-  /* Records */
   const [recordsList, setRecordsList]     = useState([]);
   const [recordsQuery, setRecordsQuery]   = useState("");
   const [recordsLoading, setRecordsLoading] = useState(false);
 
-  /* Load draft or defaults */
   const draft = loadDraft();
   const dr = (key, def) => draft?.[key] !== undefined ? draft[key] : def;
 
@@ -339,6 +328,15 @@ function App() {
   const [jobDate, setJobDate]       = useState(()=>dr("jobDate",new Date().toISOString().split("T")[0]));
   const [quoteNotes, setQuoteNotes] = useState(()=>dr("quoteNotes",""));
   const [quoteNo, setQuoteNo]       = useState(()=>dr("quoteNo",genQuoteNo()));
+
+  /* ── Estimate terms (used in client email + slip) ── */
+  const [clientEmail, setClientEmail] = useState(()=>dr("clientEmail",""));
+  const [estMOQ, setEstMOQ]           = useState(()=>dr("estMOQ",""));
+  const [estLeadTime, setEstLeadTime] = useState(()=>dr("estLeadTime","7–10 working days"));
+  const [estDelivery, setEstDelivery] = useState(()=>dr("estDelivery",""));
+  const [estValidity, setEstValidity] = useState(()=>dr("estValidity","15"));
+  const [estAdvance, setEstAdvance]   = useState(()=>dr("estAdvance","50"));
+  const [estGstExtra, setEstGstExtra] = useState(()=>dr("estGstExtra",true));
 
   const [paperSettings, setPaperSettings] = useState(loadSaved("paperSettings"));
   const [companyInfo, setCompanyInfo]     = useState(loadSaved("companyInfo") || DEFAULTS.companyInfo);
@@ -371,7 +369,6 @@ function App() {
   const allUVTypes  = ["Full UV","Hybrid UV","Spot UV","Per Sheet", ...customUVTypes.map(t=>t.name)];
   const allLamTypes = ["Gloss","Matt","Velvet","Per Sheet", ...customLamTypes.map(t=>t.name)];
 
-  /* ══ APPLY CLOUD RATES TO STATE ══ */
   const applyCloudRates = (r) => {
     if (!r) return;
     if (r.paperSettings)   setPaperSettings(p  => ({...p, ...r.paperSettings}));
@@ -392,9 +389,9 @@ function App() {
     if (r.companyInfo)     setCompanyInfo(ci    => ({...ci, ...r.companyInfo}));
   };
 
-  /* ══ FETCH RATES FROM CLOUD ON APP LOAD ══ */
   useEffect(() => {
-    const url = HARDCODED_SHEETS_URL;
+    /* Use the same fallback chain as the rest of the app: localStorage → config → "" */
+    const url = sheetsUrl;
     if (!url) return;
     setRatesSyncing(true);
     fetch(url + "?action=getRates")
@@ -414,7 +411,6 @@ function App() {
       });
   }, []);
 
-  /* ══ BUILD RATES SNAPSHOT FOR CLOUD SAVE ══ */
   const buildRatesSnapshot = () => ({
     paperSettings,
     platesRates:     { normalRate: plates.normalRate, heatingRate: plates.heatingRate },
@@ -434,7 +430,6 @@ function App() {
     companyInfo,
   });
 
-  /* ══ SAVE RATES TO CLOUD ══ */
   const saveRatesToCloud = async (snapshot) => {
     const url = sheetsUrl || HARDCODED_SHEETS_URL;
     if (!url) return false;
@@ -448,26 +443,27 @@ function App() {
     } catch(e) { return false; }
   };
 
-  /* ── AUTO DRAFT SAVE ── */
   const draftTimer = useRef(null);
   useEffect(()=>{
     if(draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(()=>{
       saveDraft({ jobName, clientName, jobDate, quoteNotes, quoteNo, paperRows,
         plates, printing, varnish, uv, lamination, foiling, foilingBlock,
-        dieBlock, dieCutting, pasting, packaging, dispatch, extraCharge });
+        dieBlock, dieCutting, pasting, packaging, dispatch, extraCharge,
+        clientEmail, estMOQ, estLeadTime, estDelivery, estValidity, estAdvance, estGstExtra });
       setDraftSaved(true);
       setTimeout(()=>setDraftSaved(false), 2000);
     }, 800);
     return ()=>clearTimeout(draftTimer.current);
-  },[jobName,clientName,jobDate,quoteNotes,quoteNo,paperRows,plates,printing,varnish,uv,lamination,foiling,foilingBlock,dieBlock,dieCutting,pasting,packaging,dispatch,extraCharge]);
+  },[jobName,clientName,jobDate,quoteNotes,quoteNo,paperRows,plates,printing,varnish,uv,lamination,foiling,foilingBlock,dieBlock,dieCutting,pasting,packaging,dispatch,extraCharge,clientEmail,estMOQ,estLeadTime,estDelivery,estValidity,estAdvance,estGstExtra]);
 
-  /* ── CLEAR DRAFT / NEW JOB ── */
   const handleNewJob = () => {
     if(!confirm("Start a new estimate? Current draft will be cleared.")) return;
     localStorage.removeItem(DRAFT_KEY);
     setJobName(""); setClientName(""); setJobDate(new Date().toISOString().split("T")[0]);
     setQuoteNo(genQuoteNo()); setQuoteNotes("");
+    setClientEmail(""); setEstMOQ(""); setEstLeadTime("7–10 working days");
+    setEstDelivery(""); setEstValidity("15"); setEstAdvance("50"); setEstGstExtra(true);
     setPaperRows([{id:Date.now(),length:"",width:"",gsm:"",unit:"Packet",sheetQty:"",ratePerKg:""}]);
     setPlates(p=>({...DEFAULTS.plates, normalRate:p.normalRate, heatingRate:p.heatingRate}));
     setPrinting(p=>({...DEFAULTS.printing, tier1000:p.tier1000, tier5000:p.tier5000, tier10000:p.tier10000, tierAbove:p.tierAbove, runCharge:p.runCharge, pantoneRate:p.pantoneRate, ledRate:p.ledRate}));
@@ -484,7 +480,6 @@ function App() {
     setExtraCharge(DEFAULTS.extraCharge);
   };
 
-  /* ── SAVE SETTINGS (local + cloud) ── */
   const handleSaveSettings = async () => {
     localStorage.setItem("printcost_sheetsUrl", sheetsUrl);
     const snapshot = buildRatesSnapshot();
@@ -520,7 +515,6 @@ function App() {
     setSaveMsg("♻️ Reset to defaults."); setTimeout(()=>setSaveMsg(""), 3000);
   };
 
-  /* ══ CALCULATIONS ══ */
   const paperCalc = useMemo(()=>{
     const bc=n(paperSettings.baseConst)||3100, rb=n(paperSettings.reamsBase)||500;
     let ts=0,tw=0,tp=0;
@@ -624,7 +618,6 @@ function App() {
     ["➕ Extra Charge",    extraChargeTotal,        extraCharge.enabled],
   ].filter(([,,en])=>en);
 
-  /* ── SAVE TO GOOGLE SHEETS ── */
   const saveToSheets = async () => {
     const url = sheetsUrl || HARDCODED_SHEETS_URL;
     if(!url) { alert("Google Sheets URL not configured."); return; }
@@ -636,6 +629,7 @@ function App() {
         summaryItems: summaryItems.map(([name,val])=>({name: name.replace(/[^\w ]/g,"").trim(), value: (val*MARGIN).toFixed(2)})),
         paperRows: paperCalc.rows.map(r=>({L:r.length,W:r.width,GSM:r.gsm,sheets:r.sheetQty,kg:r.weight?.toFixed(4),price:r.price?.toFixed(2)})),
         _sections: { paperRows, plates, printing, varnish, uv, lamination, foiling, foilingBlock, dieBlock, dieCutting, pasting, packaging, dispatch, extraCharge },
+        _estimate: { clientEmail, estMOQ, estLeadTime, estDelivery, estValidity, estAdvance, estGstExtra },
         savedAt: new Date().toISOString()
       };
       await fetch(url, {
@@ -653,7 +647,6 @@ function App() {
     setSheetsSaving(false);
   };
 
-  /* ── FETCH RECORDS FROM SHEETS ── */
   const fetchRecords = async (q="") => {
     const url = sheetsUrl || HARDCODED_SHEETS_URL;
     if(!url) { alert("Sheets URL not configured."); return; }
@@ -670,7 +663,6 @@ function App() {
     setRecordsLoading(false);
   };
 
-  /* ── LOAD OLD RECORD ── */
   const loadRecord = (rec) => {
     try {
       const p = typeof rec.jsonData === "string" ? JSON.parse(rec.jsonData) : rec.jsonData;
@@ -678,6 +670,11 @@ function App() {
       setJobName(p.jobName || ""); setClientName(p.clientName || "");
       setJobDate(p.date || new Date().toISOString().split("T")[0]);
       setQuoteNo(p.id || genQuoteNo());
+      const est = p._estimate || {};
+      setClientEmail(est.clientEmail||""); setEstMOQ(est.estMOQ||"");
+      setEstLeadTime(est.estLeadTime||"7–10 working days"); setEstDelivery(est.estDelivery||"");
+      setEstValidity(est.estValidity||"15"); setEstAdvance(est.estAdvance||"50");
+      setEstGstExtra(est.estGstExtra!==undefined?est.estGstExtra:true);
       const s = p._sections || {};
       if(s.paperRows && Array.isArray(s.paperRows) && s.paperRows.length > 0) setPaperRows(s.paperRows);
       if(s.plates)       setPlates({      ...DEFAULTS.plates,      ...s.plates      });
@@ -699,7 +696,6 @@ function App() {
     } catch(e) { alert("Could not load this record."); }
   };
 
-  /* ── COPY UTILS ── */
   const copySummary = () => {
     const lines = summaryItems.map(([k,v])=>`${k.replace(/[^\w ]/g,"").trim()}: ₹${fmt(v)}`).join("\n");
     const text = `COST ESTIMATE — ${quoteNo}\n${"=".repeat(32)}\n${jobName?"Job: "+jobName+"\n":""}${clientName?"Client: "+clientName+"\n":""}Date: ${jobDate}\n${"=".repeat(32)}\n${lines}\n${"─".repeat(32)}\nActual Total: ₹${fmt(grandTotal)}\nClient Price (30% margin): ₹${fmt(grandTotalWithMargin)}`;
@@ -707,7 +703,6 @@ function App() {
     else { const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); alert("✅ Copied!"); }
   };
 
-  /* ── ADD / REMOVE CUSTOM TYPES ── */
   const addCustomType = (which) => {
     if(which==="uv") { if(!newUVType.name.trim()) return alert("Enter type name"); setCustomUVTypes([...customUVTypes,{id:uid(),name:newUVType.name.trim(),ratePerSheet:newUVType.ratePerSheet}]); setNewUVType({name:"",ratePerSheet:5}); }
     else if(which==="lam") { if(!newLamType.name.trim()) return alert("Enter type name"); setCustomLamTypes([...customLamTypes,{id:uid(),name:newLamType.name.trim(),ratePerSheet:newLamType.ratePerSheet}]); setNewLamType({name:"",ratePerSheet:8}); }
@@ -719,7 +714,6 @@ function App() {
     if(which==="foil") setCustomFoilTypes(customFoilTypes.filter(t=>t.id!==id));
   };
 
-  /* ════════ RATE GROUPS ════════ */
   const rateGroups = [
     {title:"Paper — Weight Formula",icon:"📄",color:"#1a4fd6",fields:[
       {label:"Base Constant",get:()=>paperSettings.baseConst,set:v=>setPaperSettings(p=>({...p,baseConst:v})),hint:"Industry standard: 3100"},
@@ -792,10 +786,60 @@ function App() {
     ]},
   ];
 
-  /* ════════ QUOTE MODAL ════════ */
   const [slipShowBreakdown, setSlipShowBreakdown] = useState(false);
   const [slipRemark, setSlipRemark] = useState("");
   const [itemQty, setItemQty] = useState("");
+
+  /* ── BUILD CLIENT EMAIL (subject + body) ── */
+  const buildClientEmail = () => {
+    const ci = companyInfo;
+    const dateStr = new Date(jobDate).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"});
+    const lines = [];
+    lines.push(`Dear ${clientName||"Sir/Madam"},`, "");
+    lines.push("Thank you for your enquiry. Please find below our estimate for your requirement.", "");
+    lines.push("ESTIMATE DETAILS");
+    lines.push(`Estimate No       : ${quoteNo}`);
+    lines.push(`Date              : ${dateStr}`);
+    lines.push(`Job / Description : ${jobName||"—"}`, "");
+    lines.push("PRICING");
+    lines.push(`Total Estimate    : ₹${fmt(grandTotalWithMargin)}`);
+    if(n(itemQty)>0) lines.push(`Price per piece   : ₹${fmt(grandTotalWithMargin/n(itemQty))}  (for ${fmtInt(n(itemQty))} pcs)`);
+    if(estMOQ) lines.push(`Minimum Order Qty : ${estMOQ}`);
+    lines.push("");
+    lines.push("LEAD TIME & DELIVERY");
+    lines.push(`Lead Time         : ${estLeadTime||"To be confirmed"}`);
+    if(estDelivery) lines.push(`Expected Delivery : ${new Date(estDelivery).toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}`);
+    lines.push("");
+    lines.push("TERMS & CONDITIONS");
+    lines.push("  - This is an estimated amount; final may vary with quantity / final artwork / specifications.");
+    lines.push(`  - Quotation valid for ${estValidity||"15"} days from the date above; rates may be revised thereafter.`);
+    lines.push(`  - ${estAdvance||"50"}% advance required to confirm the order.`);
+    if(estGstExtra) lines.push("  - GST extra as applicable.");
+    (ci.terms||"").split("\n").map(t=>t.trim()).filter(Boolean).forEach(t=>lines.push(`  - ${t}`));
+    if(slipRemark){ lines.push("", `Note: ${slipRemark}`); }
+    lines.push("", "We look forward to your confirmation. Please feel free to reach out for any clarification.", "");
+    lines.push("Regards,", ci.name||"JSS THE PRINT ZONE");
+    if(ci.tagline) lines.push(ci.tagline);
+    const contact = [ci.phone, ci.email].filter(Boolean).join(" | ");
+    if(contact) lines.push(contact);
+    if(ci.address) lines.push(ci.address);
+    if(ci.gstin) lines.push(`GSTIN: ${ci.gstin}`);
+    const subject = `Estimate ${quoteNo} — ${jobName||"Print Job"} | ${ci.name||"JSS THE PRINT ZONE"}`;
+    return { subject, body: lines.join("\n") };
+  };
+
+  const emailClient = () => {
+    const { subject, body } = buildClientEmail();
+    const mailto = `mailto:${clientEmail||""}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailto;
+  };
+
+  const copyClientEmail = () => {
+    const { subject, body } = buildClientEmail();
+    const text = `Subject: ${subject}\n\n${body}`;
+    if(navigator.clipboard) navigator.clipboard.writeText(text).then(()=>alert("✅ Estimate email copied! Paste into Gmail/Outlook."));
+    else { const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); alert("✅ Copied!"); }
+  };
 
   const copyWhatsAppClient = () => {
     const ci = companyInfo;
@@ -860,6 +904,8 @@ ${lines}
               <button onClick={()=>saveToSheets()} style={{background:sheetsSaved?"#16a34a":"#059669",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
                 {sheetsSaving?"⏳ Saving...":sheetsSaved?"✅ Saved!":"📊 Save to Sheets"}
               </button>
+              <button onClick={emailClient} style={{background:"#1a4fd6",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✉️ Email</button>
+              <button onClick={copyClientEmail} style={{background:"#3b70e8",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Copy Mail</button>
               <button onClick={copyWhatsAppClient} style={{background:"#25D366",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📲 WA Client</button>
               <button onClick={copyWhatsAppBoss} style={{background:"#128C7E",border:"none",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📲 WA Boss</button>
               <button onClick={()=>window.print()} style={{background:"rgba(255,255,255,.18)",border:"1.5px solid rgba(255,255,255,.3)",color:"#fff",padding:"7px 13px",borderRadius:7,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🖨 Print / PDF</button>
@@ -956,7 +1002,6 @@ ${lines}
     );
   };
 
-  /* ════════ RECORDS MODAL ════════ */
   const RecordsModal = () => (
     <div style={{position:"fixed",inset:0,background:"rgba(10,20,60,.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:2100,padding:16}}>
       <div style={{background:"#fff",borderRadius:12,width:"100%",maxWidth:680,maxHeight:"88vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 32px 80px rgba(10,20,60,.4)"}}>
@@ -995,7 +1040,6 @@ ${lines}
     </div>
   );
 
-  /* ════════ SETTINGS MODAL ════════ */
   const SettingsModal = () => (
     <div style={{position:"fixed",inset:0,background:"rgba(15,30,70,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
       <div style={{background:T.bgCard,borderRadius:14,width:700,maxHeight:"90vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(15,30,70,.3)",border:`1.5px solid ${T.border}`}}>
@@ -1015,7 +1059,7 @@ ${lines}
           {settingsTab==="rates" && (
             <div>
               <div style={{background:"#ecfdf5",border:"1px solid #6ee7b7",borderRadius:7,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#065f46",lineHeight:1.6}}>
-                ☁️ <b>Cloud Sync Active:</b> When you click "Save &amp; Apply", rates are saved to Google Sheets and automatically loaded for <b>everyone</b> who opens this app next time.
+                ☁️ <b>Cloud Sync Active:</b> When you click "Save & Apply", rates are saved to Google Sheets and automatically loaded for <b>everyone</b> who opens this app next time.
               </div>
               {rateGroups.map(group=>(
                 <div key={group.title} style={{marginBottom:10,borderRadius:8,border:`1.5px solid ${T.border}`,overflow:"hidden"}}>
@@ -1042,11 +1086,11 @@ ${lines}
                 💡 Company info appears on the <b>Client Quote</b> printout. Fill once, save, and it syncs for everyone.
               </div>
               {[
-                {label:"Company / Business Name",key:"name",placeholder:"JSS THE PRINT ZONE"},
-                {label:"Tagline / Speciality",key:"tagline",placeholder:"Offset Printing"},
-                {label:"Address",key:"address",placeholder:"dsidc shed, 39, Scheme 1, Okhla Phase II..."},
+                {label:"Company / Business Name",key:"name",placeholder:"Your company name"},
+                {label:"Tagline / Speciality",key:"tagline",placeholder:"e.g. Offset Printing"},
+                {label:"Address",key:"address",placeholder:"Full business address"},
                 {label:"Phone / WhatsApp",key:"phone",placeholder:"+91 XXXXX XXXXX"},
-                {label:"Email",key:"email",placeholder:"info@jsstheprintzone.com"},
+                {label:"Email",key:"email",placeholder:"info@yourcompany.com"},
                 {label:"GSTIN",key:"gstin",placeholder:"22AAAAA0000A1Z5"},
               ].map(f=>(
                 <div key={f.key} style={{marginBottom:12}}>
@@ -1103,7 +1147,7 @@ ${lines}
           {settingsTab==="sheets" && (
             <div>
               <div style={{background:"#fef3c7",border:"1px solid #fde68a",borderRadius:8,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#92400e",lineHeight:1.7}}>
-                ⚠️ <b>Action Required:</b> Your Google Sheets URL is already hardcoded. But to enable <b>cloud rate sync</b>, you must <b>update your Apps Script</b> with the new code below and create a <b>New Deployment</b>. The old deployment won't support rate syncing.
+                ⚠️ <b>When this app is served from Apps Script</b>, the URL is auto-injected and you can leave this field as-is. If you opened the HTML directly, paste your Web App URL below. The URL is stored on this device only.
               </div>
               <div style={{background:"#ecfdf5",border:"1px solid #6ee7b7",borderRadius:8,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#065f46",lineHeight:1.7}}>
                 <b>Steps to update your Apps Script:</b>
@@ -1111,7 +1155,7 @@ ${lines}
                   <li>Open your Google Sheet → <b>Extensions → Apps Script</b></li>
                   <li>Delete all existing code, paste the updated code below.</li>
                   <li>Click 💾 Save, then <b>Deploy → New Deployment → Web App</b></li>
-                  <li>Set <b>Execute as: Me</b> &amp; <b>Who has access: Anyone</b> → Deploy.</li>
+                  <li>Set <b>Execute as: Me</b> & <b>Who has access: Anyone</b> → Deploy.</li>
                   <li>Copy the new Web App URL and paste it below if it changed.</li>
                 </ol>
               </div>
@@ -1122,7 +1166,7 @@ ${lines}
               </div>
               <div style={{borderRadius:8,border:`1.5px solid ${T.border}`,overflow:"hidden",marginBottom:8}}>
                 <div style={{background:T.bgSection,padding:"9px 14px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:12,fontWeight:700,color:"#059669"}}>📋 Updated Apps Script Code — Copy &amp; Replace</span>
+                  <span style={{fontSize:12,fontWeight:700,color:"#059669"}}>📋 Updated Apps Script Code — Copy & Replace</span>
                   <button onClick={()=>{if(navigator.clipboard) navigator.clipboard.writeText(APPS_SCRIPT_CODE).then(()=>alert("✅ Code copied! Paste in Apps Script editor."));}} style={{background:"#059669",color:"#fff",border:"none",padding:"4px 12px",borderRadius:5,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Copy Code</button>
                 </div>
                 <pre style={{padding:"12px 14px",fontSize:10,lineHeight:1.6,overflowX:"auto",color:"#1e2d50",background:"#f8faff",maxHeight:220,margin:0}}>{APPS_SCRIPT_CODE}</pre>
@@ -1133,7 +1177,7 @@ ${lines}
         <div style={{padding:"14px 22px",borderTop:`1px solid ${T.border}`,background:T.bgSub,flexShrink:0}}>
           <div style={{display:"flex",gap:8,marginBottom:6}}>
             <button onClick={handleSaveSettings} className="btn-primary" style={{flex:3,background:T.primary,color:"#fff",border:"none",padding:12,borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
-              ☁️ Save &amp; Sync to All Users
+              ☁️ Save & Sync to All Users
             </button>
             <button onClick={handleResetRates} style={{flex:1,background:"#fef2f2",color:"#dc2626",border:"1.5px solid #fecaca",padding:12,borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>♻️ Reset</button>
           </div>
@@ -1143,22 +1187,19 @@ ${lines}
     </div>
   );
 
-  /* ════════════ RENDER ════════════ */
   return (
     <div style={{minHeight:"100vh",background:T.bgPage}}>
 
-      {/* NAV */}
       <div className="no-print" style={{background:T.bgHeader,boxShadow:"0 2px 12px rgba(0,0,0,.18)",position:"sticky",top:0,zIndex:100}}>
         <div style={{maxWidth:1140,margin:"0 auto",padding:"0 20px",display:"flex",alignItems:"center",justifyContent:"space-between",height:58}}>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
             <div style={{width:38,height:38,borderRadius:9,background:"rgba(255,255,255,.18)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20}}>🖨</div>
             <div>
-              <div style={{color:"#fff",fontWeight:800,fontSize:16}}>JSS THE PRINT ZONE</div>
+              <div style={{color:"#fff",fontWeight:800,fontSize:16}}>{companyInfo.name||"JSS THE PRINT ZONE"}</div>
               <div style={{color:"rgba(255,255,255,.5)",fontSize:10,letterSpacing:1.1}}>OFFSET ESTIMATOR</div>
             </div>
           </div>
           <div style={{display:"flex",gap:7,alignItems:"center"}}>
-            {/* Cloud sync status */}
             {ratesSyncing && (
               <div className="sync-pulse" style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.2)",color:"rgba(255,255,255,.8)",fontSize:10,padding:"3px 10px",borderRadius:12,fontWeight:600}}>
                 ☁️ Syncing rates...
@@ -1187,17 +1228,14 @@ ${lines}
         </div>
       </div>
 
-      {/* TOAST */}
       {saveMsg && (
         <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",zIndex:3000,background:"#1e2d50",color:"#fff",padding:"12px 24px",borderRadius:10,fontSize:13,fontWeight:600,boxShadow:"0 8px 24px rgba(0,0,0,.25)"}}>
           {saveMsg}
         </div>
       )}
 
-      {/* MAIN */}
       <div style={{maxWidth:1140,margin:"0 auto",padding:"22px 16px 60px"}}>
 
-        {/* Banner */}
         <div style={{background:"#eff6ff",border:"1.5px solid #bfdbfe",borderRadius:8,padding:"10px 16px",marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
           <span style={{fontSize:16}}>📐</span>
           <span style={{fontSize:12,color:"#1e40af"}}>
@@ -1210,7 +1248,6 @@ ${lines}
           </div>
         </div>
 
-        {/* JOB INFO */}
         <div style={{background:T.bgCard,borderRadius:10,padding:"16px 20px",marginBottom:16,border:`1.5px solid ${T.border}`,boxShadow:T.shadow,display:"flex",gap:14,flexWrap:"wrap",alignItems:"flex-end"}}>
           <div style={{flex:2,minWidth:200}}>
             <label style={LBL}>Job Name / Description</label>
@@ -1230,10 +1267,50 @@ ${lines}
           </div>
         </div>
 
+        {/* ══ ESTIMATE TERMS & DELIVERY ══ */}
+        <div style={{background:T.bgCard,borderRadius:10,padding:"14px 20px 16px",marginBottom:16,border:`1.5px solid ${T.border}`,boxShadow:T.shadow}}>
+          <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:14,paddingBottom:10,borderBottom:`1px solid ${T.bgSection}`}}>
+            <span style={{fontSize:17}}>📋</span>
+            <span style={{color:T.primary,fontWeight:800,fontSize:13}}>Estimate Terms & Delivery</span>
+            <span style={{marginLeft:"auto",fontSize:10,color:T.textDim,fontStyle:"italic"}}>used in client email / slip</span>
+          </div>
+          <Row>
+            <div style={{flex:1,minWidth:130}}>
+              <label style={LBL}>Min Order Qty (MOQ)</label>
+              <input value={estMOQ} placeholder="e.g. 1000 pcs" onChange={e=>setEstMOQ(e.target.value)} style={BASE_INP} />
+            </div>
+            <div style={{flex:1.4,minWidth:160}}>
+              <label style={LBL}>Lead Time</label>
+              <input value={estLeadTime} placeholder="e.g. 7–10 working days" onChange={e=>setEstLeadTime(e.target.value)} style={BASE_INP} />
+            </div>
+            <div style={{flex:1,minWidth:140}}>
+              <label style={LBL}>Expected Delivery</label>
+              <input type="date" value={estDelivery} onChange={e=>setEstDelivery(e.target.value)} style={BASE_INP} />
+            </div>
+          </Row>
+          <Row>
+            <div style={{flex:1,minWidth:110}}>
+              <label style={LBL}>Quote Validity (days)</label>
+              <input type="number" value={estValidity} onChange={e=>setEstValidity(e.target.value)} style={BASE_INP} />
+            </div>
+            <div style={{flex:1,minWidth:110}}>
+              <label style={LBL}>Advance Required (%)</label>
+              <input type="number" value={estAdvance} onChange={e=>setEstAdvance(e.target.value)} style={BASE_INP} />
+            </div>
+            <div style={{flex:2,minWidth:200}}>
+              <label style={LBL}>Client Email (for sending)</label>
+              <input type="email" value={clientEmail} placeholder="client@email.com" onChange={e=>setClientEmail(e.target.value)} style={BASE_INP} />
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8,paddingBottom:6}}>
+              <span style={{fontSize:11,fontWeight:700,color:T.textMid,whiteSpace:"nowrap"}}>GST extra</span>
+              <Toggle on={estGstExtra} onClick={()=>setEstGstExtra(v=>!v)} />
+            </div>
+          </Row>
+        </div>
+
         <div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:16,alignItems:"start"}}>
           <div>
 
-            {/* ══ PAPER ══ */}
             <SectionCard title="Paper Measurement" icon="📄" alwaysOn total={paperCalc.totalPrice}>
               <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:6,padding:"7px 12px",marginBottom:12,fontSize:11,color:"#1e40af"}}>
                 ⚠️ Enter <b>SHEET QTY = total number of sheets</b> (e.g. 5000). Equivalent units shown automatically.
@@ -1279,7 +1356,6 @@ ${lines}
               </div>
             </SectionCard>
 
-            {/* ══ PLATES ══ */}
             <SectionCard title="Plates" icon="🖨" enabled={plates.enabled} onToggle={v=>setPlates({...plates,enabled:v})} total={platesTotal}>
               <Row>
                 <Field label="Normal Plate Rate (₹)" value={plates.normalRate} onChange={v=>setPlates({...plates,normalRate:v})} />
@@ -1292,7 +1368,6 @@ ${lines}
               <SubRow label="Total Plates" value={platesTotal} highlight />
             </SectionCard>
 
-            {/* ══ PRINTING ══ */}
             <SectionCard title="Printing" icon="🎨" enabled={printing.enabled} onToggle={v=>setPrinting({...printing,enabled:v})} total={printingCalc.total}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"8px 14px"}}>
                 <span style={{fontSize:12,fontWeight:700,color:"#1e40af"}}>Rate Mode:</span>
@@ -1315,7 +1390,6 @@ ${lines}
               <SubRow label="Total Printing" value={printingCalc.total} highlight />
             </SectionCard>
 
-            {/* ══ VARNISH ══ */}
             <SectionCard title="Varnish" icon="✨" enabled={varnish.enabled} onToggle={v=>setVarnish({...varnish,enabled:v})} total={varnishTotal}>
               <Row>
                 <Field label="Job Length (in)" value={varnish.length} onChange={v=>setVarnish({...varnish,length:v})} />
@@ -1327,7 +1401,6 @@ ${lines}
               <Hint text={`(L × W) ÷ ${varnish.divisor} × ${varnish.paisa} × Sheets`} />
             </SectionCard>
 
-            {/* ══ UV ══ */}
             <SectionCard title="UV Coating" icon="💡" enabled={uv.enabled} onToggle={v=>setUV({...uv,enabled:v})} total={uvCalc.total}>
               <Row>
                 <Field label="UV Type" value={uv.type} onChange={v=>setUV({...uv,type:v})} options={allUVTypes} />
@@ -1354,7 +1427,6 @@ ${lines}
               </div>
             </SectionCard>
 
-            {/* ══ LAMINATION ══ */}
             <SectionCard title="Lamination" icon="🏷" enabled={lamination.enabled} onToggle={v=>setLamination({...lamination,enabled:v})} total={laminationTotal}>
               <Row>
                 <Field label="Type" value={lamination.type} onChange={v=>setLamination({...lamination,type:v})} options={allLamTypes} />
@@ -1377,7 +1449,6 @@ ${lines}
               <SubRow label="Total Lamination" value={laminationTotal} highlight />
             </SectionCard>
 
-            {/* ══ FOILING ══ */}
             <SectionCard title="Foiling" icon="🌟" enabled={foiling.enabled} onToggle={v=>setFoiling({...foiling,enabled:v})} total={foilingTotal}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"8px 14px",flexWrap:"wrap"}}>
                 <span style={{fontSize:12,fontWeight:700,color:"#1e40af"}}>Foiling Mode:</span>
@@ -1415,7 +1486,6 @@ ${lines}
               <SubRow label="Total Foiling" value={foilingTotal} highlight />
             </SectionCard>
 
-            {/* ══ FOILING BLOCK ══ */}
             <SectionCard title="Foiling Block (Making Charge)" icon="🔲" enabled={foilingBlock.enabled} onToggle={v=>setFoilingBlock({...foilingBlock,enabled:v})} total={foilingBTotal}>
               <Row>
                 <Field label="Length (in)" value={foilingBlock.length} onChange={v=>setFoilingBlock({...foilingBlock,length:v})} />
@@ -1427,7 +1497,6 @@ ${lines}
               <Hint text="L × W × Rate" />
             </SectionCard>
 
-            {/* ══ DIE BLOCK ══ */}
             <SectionCard title="Die Block" icon="⬛" enabled={dieBlock.enabled} onToggle={v=>setDieBlock({...dieBlock,enabled:v})} total={dieBlockTotal}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"8px 14px"}}>
                 <span style={{fontSize:12,fontWeight:700,color:"#1e40af"}}>Charge Mode:</span>
@@ -1464,7 +1533,6 @@ ${lines}
               {dieBlock.rateMode==="Fixed Price"      && <Hint text={`Fixed Die Block Charge: ₹${dieBlock.fixedPrice||0}`} />}
             </SectionCard>
 
-            {/* ══ DIE CUTTING ══ */}
             <SectionCard title="Die Cutting" icon="✂️" enabled={dieCutting.enabled} onToggle={v=>setDieCutting({...dieCutting,enabled:v})} total={dieCutTotal}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"8px 14px"}}>
                 <span style={{fontSize:12,fontWeight:700,color:"#1e40af"}}>Charge Mode:</span>
@@ -1489,7 +1557,6 @@ ${lines}
               {dieCutting.rateMode==="Per 1000 Sheets"?<Hint text={`₹${dieCutting.rate} × ${dieCutting.sheetQty||0} ÷ 1000 = ₹${fmt(dieCutTotal)}`} />:<Hint text={`Fixed Charge: ₹${dieCutting.fixedCharge||0}`} />}
             </SectionCard>
 
-            {/* ══ PASTING ══ */}
             <SectionCard title="Pasting" icon="📦" enabled={pasting.enabled} onToggle={v=>setPasting({...pasting,enabled:v})} total={pastingCalc.total}>
               <div style={{background:"#f8faff",border:"1.5px solid #c5d8f8",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
                 <div style={{fontSize:11,fontWeight:800,color:T.primary,textTransform:"uppercase",letterSpacing:.8,marginBottom:8}}>🔒 Lock Pasting</div>
@@ -1516,7 +1583,6 @@ ${lines}
               <SubRow label="Total Pasting" value={pastingCalc.total} highlight />
             </SectionCard>
 
-            {/* ══ PACKAGING ══ */}
             <SectionCard title="Packaging" icon="🎁" enabled={packaging.enabled} onToggle={v=>setPackaging({...packaging,enabled:v})} total={packagingTotal}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:7,padding:"8px 14px"}}>
                 <span style={{fontSize:12,fontWeight:700,color:"#1e40af"}}>Charge Mode:</span>
@@ -1541,7 +1607,6 @@ ${lines}
               {packaging.mode==="Per Carton"?<Hint text={`${packaging.numCartons||0} Cartons × ₹${packaging.ratePerCarton} = ₹${fmt(packagingTotal)}`} />:<Hint text={`Fixed: ₹${packaging.fixedPrice||0}`} />}
             </SectionCard>
 
-            {/* ══ DISPATCH ══ */}
             <SectionCard title="Forwarding / Dispatch" icon="🚚" enabled={dispatch.enabled} onToggle={v=>setDispatch({...dispatch,enabled:v})} total={dispatchTotal}>
               <Row>
                 <Field label="Fixed Dispatch Rate (₹)" value={dispatch.fixedRate} onChange={v=>setDispatch({...dispatch,fixedRate:v})} />
@@ -1552,7 +1617,6 @@ ${lines}
               <div style={{marginTop:8,fontSize:11,color:T.textDim,fontStyle:"italic"}}>💡 Typical range: ₹600 – ₹700</div>
             </SectionCard>
 
-            {/* ══ EXTRA CHARGE ══ */}
             <SectionCard title="Extra Charge" icon="➕" enabled={extraCharge.enabled} onToggle={v=>setExtraCharge({...extraCharge,enabled:v})} total={extraChargeTotal}>
               <Row>
                 <div style={{flex:3,minWidth:200}}>
@@ -1568,7 +1632,6 @@ ${lines}
               <Hint text="Any additional / miscellaneous charges" />
             </SectionCard>
 
-            {/* ══ PER ITEM PRICE CALCULATOR ══ */}
             <div style={{background:"#fffbeb",borderRadius:10,marginBottom:10,overflow:"hidden",border:"1.5px solid #fde68a",boxShadow:"0 4px 16px rgba(180,83,9,.08)"}}>
               <div style={{background:"#fef3c7",padding:"11px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1.5px solid #fde68a"}}>
                 <div style={{display:"flex",alignItems:"center",gap:9}}>
@@ -1624,7 +1687,6 @@ ${lines}
 
           </div>{/* end left col */}
 
-          {/* ══ STICKY SUMMARY ══ */}
           <div className="no-print" style={{position:"sticky",top:74}}>
             <div style={{background:T.bgCard,borderRadius:12,border:`1.5px solid ${T.border}`,boxShadow:T.shadowMd,overflow:"hidden"}}>
               <div style={{background:T.bgHeader,padding:"14px 18px"}}>
@@ -1657,7 +1719,7 @@ ${lines}
                 <div style={{color:T.primary,fontFamily:"monospace",fontSize:26,fontWeight:800}}>₹{fmt(grandTotalWithMargin)}</div>
               </div>
               <div style={{padding:"0 12px 14px",display:"flex",flexDirection:"column",gap:8}}>
-                <button onClick={()=>setShowQuote(true)} className="btn-primary" style={{width:"100%",background:"#1e2d50",color:"#fff",border:"none",padding:10,borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📄 Client Slip / WhatsApp</button>
+                <button onClick={()=>setShowQuote(true)} className="btn-primary" style={{width:"100%",background:"#1e2d50",color:"#fff",border:"none",padding:10,borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📄 Client Slip / Email / WhatsApp</button>
                 <button onClick={()=>window.print()} className="btn-primary" style={{width:"100%",background:T.primary,color:"#fff",border:"none",padding:10,borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🖨 Print / Save PDF</button>
                 <button onClick={copySummary} style={{width:"100%",background:T.bgSection,color:T.primary,border:`1.5px solid ${T.border}`,padding:9,borderRadius:7,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>📋 Copy Summary</button>
                 <button onClick={saveToSheets} style={{width:"100%",background:"#ecfdf5",color:"#059669",border:"1.5px solid #6ee7b7",padding:9,borderRadius:7,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
@@ -1670,12 +1732,10 @@ ${lines}
         </div>
       </div>
 
-      {/* MODALS */}
       {showQuote    && <QuoteModal />}
       {showSettings && <SettingsModal />}
       {showRecords  && <RecordsModal />}
 
-      {/* GUIDE */}
       {showGuide && (
         <div style={{position:"fixed",inset:0,background:"rgba(15,30,70,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}}>
           <div style={{background:T.bgCard,borderRadius:14,width:520,maxHeight:"85vh",overflow:"hidden",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(15,30,70,.3)",border:`1.5px solid ${T.border}`}}>
@@ -1686,14 +1746,14 @@ ${lines}
             <div style={{overflowY:"auto",padding:"20px 24px"}}>
               {[
                 ["1️⃣","Fill Job Info","Job name, client name, date and quote number at the top."],
-                ["2️⃣","Paper — Sheet Qty","Enter total sheets directly (e.g. 5000). Equivalent reams/packets shown automatically."],
-                ["3️⃣","30% Margin","Applied automatically. Internal cost and client price shown separately. Client slip shows only marked-up price."],
-                ["4️⃣","Auto Draft Save","Your work auto-saves every second in the browser. Refreshing restores your session."],
-                ["5️⃣","☁️ Cloud Rate Sync","Go to ⚙️ Settings → Rates. Change any rate → click 'Save & Sync'. Rates are saved to Google Sheets and automatically loaded for EVERYONE who opens the app."],
-                ["6️⃣","First Time Setup","Update your Apps Script with the new code (Settings → Google Sheets tab). Create a New Deployment once. After that, rate sync is fully automatic."],
-                ["7️⃣","Records","Click 📂 Records. Search by job name, client, date or ID. Click any record to fully restore it."],
-                ["8️⃣","UV / Lamination","'Per Sheet' mode available. Add custom types via ⚙️ Settings → Custom Types (also synced)."],
-                ["9️⃣","Foiling — 2 Modes","Area Based (L×W×rate×blocks×sheets) or Per Sheet."],
+                ["2️⃣","Estimate Terms","MOQ, lead time, delivery date, validity, advance % — all used in the client email and WhatsApp slip."],
+                ["3️⃣","Paper — Sheet Qty","Enter total sheets directly (e.g. 5000). Equivalent reams/packets shown automatically."],
+                ["4️⃣","30% Margin","Applied automatically. Internal cost and client price shown separately. Client slip shows only marked-up price."],
+                ["5️⃣","✉️ Email Client","Open Client Slip → click Email. Opens your mail app with subject + full estimate body. Copy Mail button copies to clipboard for Gmail/Outlook."],
+                ["6️⃣","Auto Draft Save","Your work auto-saves every second in the browser. Refreshing restores your session."],
+                ["7️⃣","☁️ Cloud Rate Sync","⚙️ Settings → Rates. Change a rate → Save & Sync. Rates push to Google Sheets and auto-load for everyone next time."],
+                ["8️⃣","Records","📂 Records — search by job, client, date or ID. Click any record to fully restore it (estimate fields included)."],
+                ["9️⃣","Custom Types","UV / Lamination / Foiling — add custom types in ⚙️ Settings → Custom Types. Also synced."],
                 ["🔟","Client Slip","📄 Client Slip shows breakdown with 30% margin — no margin label visible to client."],
               ].map(([num,title,desc])=>(
                 <div key={title} style={{display:"flex",gap:14,marginBottom:16,alignItems:"flex-start"}}>
