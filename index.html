@@ -43,28 +43,18 @@
 </head>
 <body>
 <div id="root"></div>
-<script>
-  /* Injected by Apps Script when serving the page (see doGet in Code.gs).
-     If you open this HTML directly (file://), APPS_URL is empty and the
-     user can paste the URL in Settings → Google Sheets like before. */
-  window.APPS_URL = "<?= https://script.google.com/macros/s/AKfycbzdzKoB2yUr6csrMjBz1N0l1LEFV60pNbU8o-BZbm6-342Cki0ldbOzC8RI-nJiMC8q/exec ?>";
-</script>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef, useCallback } = React;
 
 /* ══════════════════════════════════════════════════════════════
    🔧 APPS SCRIPT URL
    ──────────────────────────────────────────────────────────────
-   When this page is served BY Apps Script (via doGet), the
-   deployment URL is injected into window.APPS_URL above. The
-   React app reads it here. No URL is hardcoded in this file,
-   so it's safe to commit to a public GitHub repo.
-
-   If the file is opened directly (file://) APPS_URL is empty.
-   The user can still paste a URL in Settings → Google Sheets,
-   which then persists in localStorage.
+   No URL is hardcoded here — keeps this file safe for a public
+   GitHub repo. On first visit per device, the user pastes the
+   Apps Script Web App URL into ⚙️ Settings → Google Sheets;
+   it then persists in localStorage.
    ══════════════════════════════════════════════════════════════ */
-const HARDCODED_SHEETS_URL = (typeof window !== "undefined" && window.APPS_URL) || "";
+const HARDCODED_SHEETS_URL = "";
 
 /* Margin multiplier: 1.30 = 30% markup shown to client */
 const MARGIN = 1.30;
@@ -1147,7 +1137,7 @@ ${lines}
           {settingsTab==="sheets" && (
             <div>
               <div style={{background:"#fef3c7",border:"1px solid #fde68a",borderRadius:8,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#92400e",lineHeight:1.7}}>
-                ⚠️ <b>When this app is served from Apps Script</b>, the URL is auto-injected and you can leave this field as-is. If you opened the HTML directly, paste your Web App URL below. The URL is stored on this device only.
+                ⚠️ <b>Paste your Apps Script Web App URL below</b> — one-time per device. It's saved in localStorage and never pushed anywhere. To enable cloud rate sync, deploy the <code>Code.gs</code> file in your Google Sheet (Extensions → Apps Script).
               </div>
               <div style={{background:"#ecfdf5",border:"1px solid #6ee7b7",borderRadius:8,padding:"12px 16px",marginBottom:16,fontSize:12,color:"#065f46",lineHeight:1.7}}>
                 <b>Steps to update your Apps Script:</b>
